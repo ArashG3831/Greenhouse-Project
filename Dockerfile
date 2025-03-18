@@ -7,3 +7,5 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 
+# Simply run sender.py; the script already handles its own timing.
+CMD ["python", "./sender.py"]
