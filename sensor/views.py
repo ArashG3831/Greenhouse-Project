@@ -16,7 +16,7 @@ def get_data(request):
     # ✅ Define downsampling factors (Reduce data points)
     if time_range == '1h':
         start_date = now() - timedelta(hours=1)
-        group_factor = 1
+        group_factor = 36
     elif time_range == '24h':
         start_date = now() - timedelta(hours=24)
         group_factor = 120
