@@ -80,37 +80,52 @@ def get_data(request):
 
 @api_view(['GET'])
 def get_control_state(request):
-    """Returns the current control mode for Fan & Water."""
-    control, _ = ControlState.objects.get_or_create(id=1)  # Ensures a single record
-    return Response({"fan_mode": control.fan_mode, "water_mode": control.water_mode})
+    """Returns the current control mode for Fan & Water, including runtime state."""
+    control, _ = ControlState.objects.get_or_create(id=1)  # Ensure a single record exists
+    return Response({
+        "fan_mode": control.fan_mode,
+        "fan_is_running": control.fan_is_running,
+        "water_mode": control.water_mode,
+        "last_water_dispense": control.last_water_dispense
+    })
 
 
 @api_view(['POST'])
 def set_control_state(request):
-    """Updates the control mode for Fan & Water, with a one-time +10ml water dispense option."""
+    """Updates the control mode for Fan & Water. For water, a +10ml command triggers a dispense event."""
     control, _ = ControlState.objects.get_or_create(id=1)
 
-    # Update fan mode if provided
+    # --- Fan Control ---
     fan_mode = request.data.get("fan_mode")
     if fan_mode in ["auto", "on", "off"]:
         control.fan_mode = fan_mode
+        if fan_mode in ["on", "off"]:
+            # Direct user override: fan_is_running equals True only if mode is "on"
+            control.fan_is_running = (fan_mode == "on")
+        elif fan_mode == "auto":
+            # In auto mode, allow an extra field to indicate the current runtime state
+            fan_running = request.data.get("fan_running")
+            if fan_running is not None:
+                control.fan_is_running = bool(fan_running)
+            # Otherwise, you might decide to leave fan_is_running unchanged or compute it via other logic.
 
-    # ✅ Handle water control update
+    # --- Water Control ---
     water_mode = request.data.get("water_mode")
     if water_mode in ["auto", "off"]:
         control.water_mode = water_mode
     elif water_mode == "+10ml":
-        # ✅ Trigger a one-time command for the pump to dispense 10ml
-        # control.water_mode = water_mode  # ✅ Reset mode back to "off" after action
-        # ✅ Create a log or trigger an action in another system (e.g., send a signal to the pump)
-        print("💧 Dispensing +10ml water...")
+        from django.utils.timezone import now
+        control.last_water_dispense = now()
+        # Optionally, do not change water_mode so that the UI still shows the user‑set mode.
 
     control.save()
 
     return Response({
         "message": "Control state updated!",
         "fan_mode": control.fan_mode,
-        "water_mode": control.water_mode
+        "fan_is_running": control.fan_is_running,
+        "water_mode": control.water_mode,
+        "last_water_dispense": control.last_water_dispense
     })
 
 
