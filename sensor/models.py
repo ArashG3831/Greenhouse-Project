@@ -17,9 +17,7 @@ class ControlState(models.Model):
 
     fan_mode = models.CharField(max_length=10, choices=FAN_CHOICES, default="auto")
     water_mode = models.CharField(max_length=10, choices=WATER_CHOICES, default="auto")
-    # Extra state: whether the fan is currently running (system decision in auto mode or direct user override)
     fan_is_running = models.BooleanField(default=False)
-    # For water, record the last time a +10ml dispense was triggered
     last_water_dispense = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
