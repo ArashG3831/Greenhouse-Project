@@ -1,16 +1,17 @@
-from django.utils import timezone
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import SensorData, ControlState
+from django.http import JsonResponse
 import sqlite3
 import pandas as pd
 from django.db.models import Avg, F, Min, ExpressionWrapper, IntegerField
 from django.utils.timezone import now, timedelta
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.utils import timezone
+from .models import SensorData, ControlState  # Imported ControlState!
 
 @api_view(['GET'])
 def get_data(request):
-    # (Same as before; unchanged)
-    time_range = request.GET.get('range', '7d')
+    time_range = request.GET.get('range', '7d')  # Default to Last 7 Days
+
     if time_range == '1h':
         start_date = now() - timedelta(hours=1)
         group_factor = 36
@@ -70,29 +71,26 @@ def get_data(request):
 
 @api_view(['POST'])
 def set_control_state(request):
-    """Updates the control mode for Fan & Water and handles a one-time water dispense command."""
     control, _ = ControlState.objects.get_or_create(id=1)
 
     # Update fan mode if provided
     fan_mode = request.data.get("fan_mode")
     if fan_mode in ["auto", "on", "off"]:
         control.fan_mode = fan_mode
-        # Update runtime fan status: if set to "on", we consider it running.
         if fan_mode == "on":
             control.fan_is_running = True
         elif fan_mode == "off":
             control.fan_is_running = False
-        # In auto mode, you might update control.fan_is_running based on sensor logic
+        # For auto mode, your logic may update fan_is_running separately
 
     # Handle water control update
     water_mode = request.data.get("water_mode")
     if water_mode in ["auto", "off"]:
         control.water_mode = water_mode
     elif water_mode == "+10ml":
-        # Update last water dispense time
         control.last_water_dispense = timezone.now()
-        # Optionally, you could change water_mode here if needed
-
+        # Optionally reset water_mode if desired:
+        # control.water_mode = "off"
     control.save()
 
     return Response({
@@ -105,7 +103,6 @@ def set_control_state(request):
 
 @api_view(['GET'])
 def get_control_state(request):
-    """Returns the current control state including fan running status and last water dispense time."""
     control, _ = ControlState.objects.get_or_create(id=1)
     return Response({
         "fan_mode": control.fan_mode,
@@ -138,13 +135,17 @@ def receive_data(request):
 
 @api_view(['GET'])
 def get_predictions(request):
-    conn = sqlite3.connect("db.sqlite3")
-    query = """
-        SELECT timestamp, temperature, humidity, oxygen_level, co2_level, light_illumination
-        FROM sensor_predictions
-        ORDER BY timestamp DESC
-        LIMIT 24
-    """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return JsonResponse(df.to_dict(orient="records"), safe=False)
+    try:
+        conn = sqlite3.connect("db.sqlite3")
+        query = """
+            SELECT timestamp, temperature, humidity, oxygen_level, co2_level, light_illumination
+            FROM sensor_predictions
+            ORDER BY timestamp DESC
+            LIMIT 24
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return JsonResponse(df.to_dict(orient="records"), safe=False)
+    except Exception as e:
+        print("Error in get_predictions:", str(e))
+        return Response({"error": str(e)}, status=500)
