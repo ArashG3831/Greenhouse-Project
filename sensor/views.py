@@ -1,16 +1,19 @@
-from django.utils import timezone
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from .models import SensorData, ControlState
+from django.http import JsonResponse
 import sqlite3
 import pandas as pd
 from django.db.models import Avg, F, Min, ExpressionWrapper, IntegerField
 from django.utils.timezone import now, timedelta
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import SensorData, ControlState  # ✅ Imported ControlState!
+
 
 @api_view(['GET'])
 def get_data(request):
-    # (Same as before; unchanged)
-    time_range = request.GET.get('range', '7d')
+    """Fetch sensor data with correct timestamps for downsampling, ensuring the latest entry is always included."""
+    time_range = request.GET.get('range', '7d')  # 🔥 Default to Last 7 Days
+
+    # ✅ Define downsampling factors (Reduce data points)
     if time_range == '1h':
         start_date = now() - timedelta(hours=1)
         group_factor = 36
@@ -23,17 +26,20 @@ def get_data(request):
     elif time_range == '30d':
         start_date = now() - timedelta(days=30)
         group_factor = 2880
-    else:
+    else:  # ✅ "All" case
         start_date = None
         group_factor = 2880
 
+    # ✅ Fetch & Downsample Data
     if start_date:
         data = list(
             SensorData.objects.filter(timestamp__gte=start_date)
-            .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
+            .annotate(
+                group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField())
+            )
             .values("group_id")
             .annotate(
-                timestamp=Min("timestamp"),
+                timestamp=Min("timestamp"),  # ✅ Pick the earliest timestamp per group
                 temperature=Avg("temperature"),
                 humidity=Avg("humidity"),
                 oxygen_level=Avg("oxygen_level"),
@@ -45,10 +51,12 @@ def get_data(request):
     else:
         data = list(
             SensorData.objects.all()
-            .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
+            .annotate(
+                group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField())
+            )
             .values("group_id")
             .annotate(
-                timestamp=Min("timestamp"),
+                timestamp=Min("timestamp"),  # ✅ Pick earliest timestamp per group
                 temperature=Avg("temperature"),
                 humidity=Avg("humidity"),
                 oxygen_level=Avg("oxygen_level"),
@@ -58,15 +66,17 @@ def get_data(request):
             .order_by("timestamp")
         )
 
+    # ✅ Always Append the Latest Entry (Ensures Last Recorded Data Is Kept)
     latest_entry = (
         SensorData.objects.order_by("-timestamp")
         .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
         .first()
     )
     if latest_entry and (not data or latest_entry["timestamp"] != data[-1]["timestamp"]):
-        data.append(latest_entry)
+        data.append(latest_entry)  # ✅ Append latest data if it's missing
 
     return Response(data)
+
 
 @api_view(['POST'])
 def set_control_state(request):
@@ -116,29 +126,39 @@ def get_control_state(request):
 
 @api_view(['POST'])
 def receive_data(request):
+    """Receives sensor data from sender.py and saves it to the database."""
     try:
         data = request.data
-        print("🔥 Received data:", data)
+        print("🔥 Received data:", data)  # ✅ Debugging log
+
+        # ✅ Validate the required fields exist
         required_fields = ["temperature", "humidity", "oxygen_level", "light_illumination"]
         for field in required_fields:
             if field not in data:
                 return Response({"error": f"Missing field: {field}"}, status=400)
+
+        # ✅ Save to the database
         sensor_entry = SensorData.objects.create(
             temperature=data["temperature"],
             humidity=data["humidity"],
             oxygen_level=data["oxygen_level"],
-            co2_level=data.get("co2_level", 400),
+            co2_level=data.get("co2_level", 400),  # ✅ Default CO2 = 400 if missing
             light_illumination=data["light_illumination"]
         )
-        print("✅ Stored successfully in DB:", sensor_entry)
-        return Response({"message": "Data stored successfully!"}, status=200)
-    except Exception as e:
-        print("❌ Error storing data:", str(e))
-        return Response({"error": str(e)}, status=500)
 
+        print("✅ Stored successfully in DB:", sensor_entry)
+
+        return Response({"message": "Data stored successfully!"}, status=200)
+
+    except Exception as e:
+        print("❌ Error storing data:", str(e))  # ✅ Debugging log
+        return Response({"error": str(e)}, status=500)  # ✅ Always return a response!
+
+# ✅ Fetch AI Predictions (Last 24 Hours)
 @api_view(['GET'])
 def get_predictions(request):
-    conn = sqlite3.connect("db.sqlite3")
+    """Fetch AI-generated predictions from the database."""
+    conn = sqlite3.connect("db.sqlite3")  # 🔥 Ensure correct DB path
     query = """
         SELECT timestamp, temperature, humidity, oxygen_level, co2_level, light_illumination
         FROM sensor_predictions
@@ -147,4 +167,5 @@ def get_predictions(request):
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
+
     return JsonResponse(df.to_dict(orient="records"), safe=False)
