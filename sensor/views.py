@@ -80,49 +80,43 @@ def get_data(request):
 
 @api_view(['POST'])
 def set_control_state(request):
-    """Updates the control mode for Fan & Water and handles a one-time water dispense command."""
+    """Updates the control mode for Fan & Water, with a one-time +10ml water dispense option."""
     control, _ = ControlState.objects.get_or_create(id=1)
 
     # Update fan mode if provided
     fan_mode = request.data.get("fan_mode")
     if fan_mode in ["auto", "on", "off"]:
         control.fan_mode = fan_mode
-        # Update runtime fan status: if set to "on", we consider it running.
-        if fan_mode == "on":
-            control.fan_is_running = True
-        elif fan_mode == "off":
-            control.fan_is_running = False
-        # In auto mode, you might update control.fan_is_running based on sensor logic
 
     # Handle water control update
     water_mode = request.data.get("water_mode")
     if water_mode in ["auto", "off"]:
         control.water_mode = water_mode
     elif water_mode == "+10ml":
-        # Update last water dispense time
+        # Trigger water dispense: update the last water dispense timestamp.
         control.last_water_dispense = timezone.now()
-        # Optionally, you could change water_mode here if needed
+        # Optionally, you may want to reset the water_mode to "off" or keep it as "auto"
+        # control.water_mode = "off"  # for example
 
     control.save()
 
     return Response({
         "message": "Control state updated!",
         "fan_mode": control.fan_mode,
-        "fan_is_running": control.fan_is_running,
         "water_mode": control.water_mode,
         "last_water_dispense": control.last_water_dispense
     })
 
 @api_view(['GET'])
 def get_control_state(request):
-    """Returns the current control state including fan running status and last water dispense time."""
+    """Returns the current control mode for Fan & Water along with the last water dispense time."""
     control, _ = ControlState.objects.get_or_create(id=1)
     return Response({
         "fan_mode": control.fan_mode,
-        "fan_is_running": control.fan_is_running,
         "water_mode": control.water_mode,
         "last_water_dispense": control.last_water_dispense
     })
+
 
 @api_view(['POST'])
 def receive_data(request):
