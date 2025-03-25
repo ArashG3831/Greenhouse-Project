@@ -78,58 +78,44 @@ def get_data(request):
     return Response(data)
 
 
-@api_view(['GET'])
-def get_control_state(request):
-    """Returns the current control state for Fan & Water."""
-    control, _ = ControlState.objects.get_or_create(id=1)  # Ensure a single record exists
-    return Response({
-        "fan_mode": control.fan_mode,
-        "fan_is_running": control.fan_is_running,
-        "water_mode": control.water_mode,
-        "last_water_dispense": control.last_water_dispense
-    })
-
-
 @api_view(['POST'])
 def set_control_state(request):
-    """Updates the control state for Fan & Water.
-       For water, a '+10ml' command triggers a dispense event."""
+    """Updates the control mode for Fan & Water, with a one-time +10ml water dispense option."""
     control, _ = ControlState.objects.get_or_create(id=1)
 
-    # --- Fan Control ---
+    # Update fan mode if provided
     fan_mode = request.data.get("fan_mode")
     if fan_mode in ["auto", "on", "off"]:
         control.fan_mode = fan_mode
-        if fan_mode in ["on", "off"]:
-            # In direct mode, fan_is_running is simply True if mode is "on"
-            control.fan_is_running = (fan_mode == "on")
-        elif fan_mode == "auto":
-            # In auto mode, allow the client (or internal logic) to indicate the current state:
-            fan_running = request.data.get("fan_running")
-            if fan_running is not None:
-                control.fan_is_running = bool(fan_running)
-            # Alternatively, your backend could compute the desired state here.
 
-    # --- Water Control ---
+    # Handle water control update
     water_mode = request.data.get("water_mode")
     if water_mode in ["auto", "off"]:
         control.water_mode = water_mode
     elif water_mode == "+10ml":
-        # A dispense event: record the current timestamp.
-        from django.utils.timezone import now
-        control.last_water_dispense = now()
-        # (Optionally, do not change water_mode so that the UI still shows the user-set mode.)
+        # Trigger water dispense: update the last water dispense timestamp.
+        control.last_water_dispense = timezone.now()
+        # Optionally, you may want to reset the water_mode to "off" or keep it as "auto"
+        # control.water_mode = "off"  # for example
 
     control.save()
 
     return Response({
         "message": "Control state updated!",
         "fan_mode": control.fan_mode,
-        "fan_is_running": control.fan_is_running,
         "water_mode": control.water_mode,
         "last_water_dispense": control.last_water_dispense
     })
 
+@api_view(['GET'])
+def get_control_state(request):
+    """Returns the current control mode for Fan & Water along with the last water dispense time."""
+    control, _ = ControlState.objects.get_or_create(id=1)
+    return Response({
+        "fan_mode": control.fan_mode,
+        "water_mode": control.water_mode,
+        "last_water_dispense": control.last_water_dispense
+    })
 
 
 @api_view(['POST'])
