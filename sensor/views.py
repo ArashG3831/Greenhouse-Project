@@ -77,11 +77,10 @@ def set_control_state(request):
     fan_mode = request.data.get("fan_mode")
     if fan_mode in ["auto", "on", "off"]:
         control.fan_mode = fan_mode
-        if fan_mode == "on":
+        if fan_mode in ["on", "auto"]:  # When auto or on, set fan as running.
             control.fan_is_running = True
         elif fan_mode == "off":
             control.fan_is_running = False
-        # For auto mode, your logic may update fan_is_running separately
 
     # Handle water control update
     water_mode = request.data.get("water_mode")
@@ -91,6 +90,7 @@ def set_control_state(request):
         control.last_water_dispense = timezone.now()
         # Optionally reset water_mode if desired:
         # control.water_mode = "off"
+
     control.save()
 
     return Response({
