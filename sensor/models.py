@@ -14,13 +14,19 @@ class SensorData(models.Model):
 class ControlState(models.Model):
     """Stores the current state of Fan and Water controls."""
     fan_mode = models.CharField(
-        max_length=10, choices=[("auto", "Auto"), ("on", "On"), ("off", "Off")], default="auto"
+        max_length=10,
+        choices=[("auto", "Auto"), ("on", "On"), ("off", "Off")],
+        default="auto"
     )
     water_mode = models.CharField(
-        max_length=10, choices=[("auto", "Auto"), ("on", "On"), ("off", "Off")], default="auto"
+        max_length=10,
+        choices=[("auto", "Auto"), ("on", "On"), ("off", "Off")],
+        default="auto"
     )
-    # New field to store last water dispense timestamp
+    # New fields:
+    fan_is_running = models.BooleanField(default=False)
     last_water_dispense = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Fan: {self.fan_mode}, Water: {self.water_mode}, Last Watered: {self.last_water_dispense}"
+        return (f"Fan: {self.fan_mode} (Running: {self.fan_is_running}), "
+                f"Water: {self.water_mode}, Last Watered: {self.last_water_dispense}")
