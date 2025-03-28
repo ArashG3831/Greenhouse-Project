@@ -184,6 +184,11 @@ def smartthings_webhook(request):
     lifecycle = data.get('lifecycle')
 
     # 1) CONFIRMATION, PING, INSTALL, etc. handled above...
+    if lifecycle == 'INSTALL':
+        # pseudo-code: subscribe to switch capability on any chosen device
+        # or dynamically subscribe to all devices with a certain capability
+        pass
+
     if lifecycle == 'EXECUTE':
         execute_data = data.get('executeData', {})
         commands = execute_data.get('commands', [])
