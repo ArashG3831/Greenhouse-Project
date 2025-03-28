@@ -112,6 +112,38 @@ def get_control_state(request):
     })
 
 @api_view(['POST'])
+def smartthings_webhook(request):
+    data = request.data
+    commands = data.get("commands", [])
+
+    control, _ = ControlState.objects.get_or_create(id=1)
+
+    if not commands:
+        return Response({"error": "No commands received"}, status=400)
+
+    for command in commands:
+        capability = command.get('capability')
+        action = command.get('command')
+
+        # Handling fan commands
+        if capability == "switch":
+            if action == "on":
+                control.fan_mode = "on"
+                control.fan_is_running = True
+            elif action == "off":
+                control.fan_mode = "off"
+                control.fan_is_running = False
+
+        # Handling water dispense via momentary switch (if needed)
+        elif capability == "momentary":
+            if action == "push":
+                control.last_water_dispense = timezone.now()
+
+    control.save()
+
+    return Response({"status": "success", "fan_mode": control.fan_mode})
+
+@api_view(['POST'])
 def receive_data(request):
     try:
         data = request.data
