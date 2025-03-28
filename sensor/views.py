@@ -207,14 +207,6 @@ def get_predictions(request):
 # --- New Endpoint: update_fan_status ---
 @api_view(['POST'])
 def update_fan_status(request):
-    """
-    Endpoint to update fan status from a SmartThings Rules webhook.
-    Expects a JSON payload:
-    {
-      "deviceId": "7f1c495a-9b0b-491b-9462-063580e25a5e",
-      "state": "on"  // or "off" or "auto"
-    }
-    """
     data = request.data
     device_id = data.get("deviceId")
     state = data.get("state")
@@ -222,17 +214,18 @@ def update_fan_status(request):
     if not device_id or not state:
         return Response({"error": "Missing deviceId or state"}, status=400)
 
-    # Optionally, verify that the deviceId matches your virtual fan's ID
     expected_device_id = "9975afad-dea0-477e-a5a3-6586d8da3f8a"
     if device_id != expected_device_id:
         return Response({"error": "Invalid device ID"}, status=400)
 
-    if state not in ["on", "off", "auto"]:
+    # Update the allowed state values:
+    allowed_states = ["on", "off", "auto", "Low", "Medium", "High"]
+    if state not in allowed_states:
         return Response({"error": "Invalid state value"}, status=400)
 
     control, _ = ControlState.objects.get_or_create(id=1)
     control.fan_mode = state
-    control.fan_is_running = state in ["on", "auto"]
+    control.fan_is_running = state in ["on", "auto", "Low", "Medium", "High"]  # Adjust logic as needed
     control.save()
 
     print(f"Webhook update: device {device_id} set to {state}")
