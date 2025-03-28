@@ -183,21 +183,35 @@ def smartthings_webhook(request):
     data = request.data
     lifecycle = data.get('lifecycle')
 
-    if lifecycle == 'CONFIRMATION':
-        confirmation_url = data['confirmationData']['confirmationUrl']
+    # 1) CONFIRMATION, PING, INSTALL, etc. handled above...
+    if lifecycle == 'EXECUTE':
+        execute_data = data.get('executeData', {})
+        commands = execute_data.get('commands', [])
 
-        # Approach (A): Do an HTTP GET to confirmation_url
-        import requests
-        try:
-            resp = requests.get(confirmation_url)
-            if resp.status_code == 200:
-                print("Successfully confirmed SmartApp!")
-            else:
-                print("Confirmation GET failed:", resp.status_code)
-        except Exception as e:
-            print("Error confirming:", e)
+        control, _ = ControlState.objects.get_or_create(id=1)
 
-        # Return a normal 200 response
-        return Response({"status": "confirmation attempted"}, status=200)
+        for cmd in commands:
+            capability = cmd.get('capability')
+            command = cmd.get('command')
+            # If you have arguments, handle them too
+            args = cmd.get('arguments', [])
 
-    # ... handle other lifecycle events like PING, INSTALL, etc. ...
+            if capability == 'switch':
+                if command == 'on':
+                    control.fan_mode = 'on'
+                    control.fan_is_running = True
+                elif command == 'off':
+                    control.fan_mode = 'off'
+                    control.fan_is_running = False
+
+            elif capability == 'fanMode':
+                if command == 'setFanMode' and args:
+                    mode = args[0]  # e.g. "low"
+                    control.fan_mode = mode
+                    control.fan_is_running = (mode.lower() != 'off')
+
+        control.save()
+        return Response({"status": "success", "fan_mode": control.fan_mode})
+
+    # Return default if no lifecycle matched
+    return Response({"status": "ignored"})
