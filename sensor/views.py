@@ -114,18 +114,44 @@ def get_control_state(request):
 @api_view(['POST'])
 def smartthings_webhook(request):
     data = request.data
+    lifecycle = data.get('lifecycle')
+
+    # 1) Handle CONFIRMATION
+    if lifecycle == 'CONFIRMATION':
+        confirmation_url = data['confirmationData']['confirmationUrl']
+        return Response({
+            'statusCode': 200,
+            'confirmationData': {
+                'confirmationUrl': confirmation_url
+            }
+        })
+
+    # 2) Handle PING
+    if lifecycle == 'PING':
+        return Response({
+            'statusCode': 200,
+            'pingData': {
+                'challenge': data['pingData']['challenge']
+            }
+        })
+
+    # 3) Handle INSTALL/UPDATE/UNINSTALL if needed
+    if lifecycle == 'INSTALL':
+        pass
+    elif lifecycle == 'UPDATE':
+        pass
+    elif lifecycle == 'UNINSTALL':
+        pass
+
+    # 4) Handle EXECUTE or commands from your existing logic
     commands = data.get("commands", [])
-
-    control, _ = ControlState.objects.get_or_create(id=1)
-
     if not commands:
         return Response({"error": "No commands received"}, status=400)
 
+    control, _ = ControlState.objects.get_or_create(id=1)
     for command in commands:
         capability = command.get('capability')
         action = command.get('command')
-
-        # Handling fan commands
         if capability == "switch":
             if action == "on":
                 control.fan_mode = "on"
@@ -133,14 +159,10 @@ def smartthings_webhook(request):
             elif action == "off":
                 control.fan_mode = "off"
                 control.fan_is_running = False
-
-        # Handling water dispense via momentary switch (if needed)
         elif capability == "momentary":
             if action == "push":
                 control.last_water_dispense = timezone.now()
-
     control.save()
-
     return Response({"status": "success", "fan_mode": control.fan_mode})
 
 @api_view(['POST'])
@@ -182,62 +204,36 @@ def get_predictions(request):
         print("Error in get_predictions:", str(e))
         return Response({"error": str(e)}, status=500)
 
+# --- New Endpoint: update_fan_status ---
 @api_view(['POST'])
-def smartthings_webhook(request):
+def update_fan_status(request):
+    """
+    Endpoint to update fan status from a SmartThings Rules webhook.
+    Expects a JSON payload:
+    {
+      "deviceId": "7f1c495a-9b0b-491b-9462-063580e25a5e",
+      "state": "on"  // or "off" or "auto"
+    }
+    """
     data = request.data
-    lifecycle = data.get('lifecycle')
+    device_id = data.get("deviceId")
+    state = data.get("state")
 
-    # 1) Handle CONFIRMATION
-    if lifecycle == 'CONFIRMATION':
-        confirmation_url = data['confirmationData']['confirmationUrl']
-        # Return JSON with the confirmationUrl
-        return Response({
-            'statusCode': 200,
-            'confirmationData': {
-                'confirmationUrl': confirmation_url
-            }
-        })
+    if not device_id or not state:
+        return Response({"error": "Missing deviceId or state"}, status=400)
 
-    # 2) Handle PING (sometimes SmartThings pings your server)
-    if lifecycle == 'PING':
-        return Response({
-            'statusCode': 200,
-            'pingData': {
-                'challenge': data['pingData']['challenge']
-            }
-        })
+    # Optionally, verify that the deviceId matches your virtual fan's ID
+    expected_device_id = "7f1c495a-9b0b-491b-9462-063580e25a5e"
+    if device_id != expected_device_id:
+        return Response({"error": "Invalid device ID"}, status=400)
 
-    # 3) Handle INSTALL/UPDATE/UNINSTALL if needed
-    if lifecycle == 'INSTALL':
-        # Add any setup logic
-        pass
-    elif lifecycle == 'UPDATE':
-        # If the SmartApp settings are updated
-        pass
-    elif lifecycle == 'UNINSTALL':
-        # Cleanup if needed
-        pass
-
-    # 4) Handle EXECUTE or commands from your existing logic
-    # (i.e. your current code that checks "commands" and updates ControlState)
-    commands = data.get("commands", [])
-    if not commands:
-        return Response({"error": "No commands received"}, status=400)
+    if state not in ["on", "off", "auto"]:
+        return Response({"error": "Invalid state value"}, status=400)
 
     control, _ = ControlState.objects.get_or_create(id=1)
-
-    for command in commands:
-        capability = command.get('capability')
-        action = command.get('command')
-
-        if capability == "switch":
-            if action == "on":
-                control.fan_mode = "on"
-                control.fan_is_running = True
-            elif action == "off":
-                control.fan_mode = "off"
-                control.fan_is_running = False
-        # etc...
-
+    control.fan_mode = state
+    control.fan_is_running = state in ["on", "auto"]
     control.save()
-    return Response({"status": "success", "fan_mode": control.fan_mode})
+
+    print(f"Webhook update: device {device_id} set to {state}")
+    return Response({"message": "Fan status updated!", "fan_mode": control.fan_mode})
