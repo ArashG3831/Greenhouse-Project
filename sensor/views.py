@@ -223,7 +223,7 @@ def update_fan_status(request):
         return Response({"error": "Missing deviceId or state"}, status=400)
 
     # Optionally, verify that the deviceId matches your virtual fan's ID
-    expected_device_id = "7f1c495a-9b0b-491b-9462-063580e25a5e"
+    expected_device_id = "9975afad-dea0-477e-a5a3-6586d8da3f8a"
     if device_id != expected_device_id:
         return Response({"error": "Invalid device ID"}, status=400)
 
