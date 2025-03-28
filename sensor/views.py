@@ -181,3 +181,63 @@ def get_predictions(request):
     except Exception as e:
         print("Error in get_predictions:", str(e))
         return Response({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+def smartthings_webhook(request):
+    data = request.data
+    lifecycle = data.get('lifecycle')
+
+    # 1) Handle CONFIRMATION
+    if lifecycle == 'CONFIRMATION':
+        confirmation_url = data['confirmationData']['confirmationUrl']
+        # Return JSON with the confirmationUrl
+        return Response({
+            'statusCode': 200,
+            'confirmationData': {
+                'confirmationUrl': confirmation_url
+            }
+        })
+
+    # 2) Handle PING (sometimes SmartThings pings your server)
+    if lifecycle == 'PING':
+        return Response({
+            'statusCode': 200,
+            'pingData': {
+                'challenge': data['pingData']['challenge']
+            }
+        })
+
+    # 3) Handle INSTALL/UPDATE/UNINSTALL if needed
+    if lifecycle == 'INSTALL':
+        # Add any setup logic
+        pass
+    elif lifecycle == 'UPDATE':
+        # If the SmartApp settings are updated
+        pass
+    elif lifecycle == 'UNINSTALL':
+        # Cleanup if needed
+        pass
+
+    # 4) Handle EXECUTE or commands from your existing logic
+    # (i.e. your current code that checks "commands" and updates ControlState)
+    commands = data.get("commands", [])
+    if not commands:
+        return Response({"error": "No commands received"}, status=400)
+
+    control, _ = ControlState.objects.get_or_create(id=1)
+
+    for command in commands:
+        capability = command.get('capability')
+        action = command.get('command')
+
+        if capability == "switch":
+            if action == "on":
+                control.fan_mode = "on"
+                control.fan_is_running = True
+            elif action == "off":
+                control.fan_mode = "off"
+                control.fan_is_running = False
+        # etc...
+
+    control.save()
+    return Response({"status": "success", "fan_mode": control.fan_mode})
