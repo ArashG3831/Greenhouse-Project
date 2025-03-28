@@ -111,59 +111,6 @@ def get_control_state(request):
         "last_water_dispense": control.last_water_dispense
     })
 
-@api_view(['POST'])
-def smartthings_webhook(request):
-    data = request.data
-    lifecycle = data.get('lifecycle')
-
-    # 1) Handle CONFIRMATION
-    if lifecycle == 'CONFIRMATION':
-        confirmation_url = data['confirmationData']['confirmationUrl']
-        return Response({
-            'statusCode': 200,
-            'confirmationData': {
-                'confirmationUrl': confirmation_url
-            }
-        })
-
-    # 2) Handle PING
-    if lifecycle == 'PING':
-        return Response({
-            'statusCode': 200,
-            'pingData': {
-                'challenge': data['pingData']['challenge']
-            }
-        })
-
-    # 3) Handle INSTALL/UPDATE/UNINSTALL if needed
-    if lifecycle == 'INSTALL':
-        pass
-    elif lifecycle == 'UPDATE':
-        pass
-    elif lifecycle == 'UNINSTALL':
-        pass
-
-    # 4) Handle EXECUTE or commands from your existing logic
-    commands = data.get("commands", [])
-    if not commands:
-        return Response({"error": "No commands received"}, status=400)
-
-    control, _ = ControlState.objects.get_or_create(id=1)
-    for command in commands:
-        capability = command.get('capability')
-        action = command.get('command')
-        if capability == "switch":
-            if action == "on":
-                control.fan_mode = "on"
-                control.fan_is_running = True
-            elif action == "off":
-                control.fan_mode = "off"
-                control.fan_is_running = False
-        elif capability == "momentary":
-            if action == "push":
-                control.last_water_dispense = timezone.now()
-    control.save()
-    return Response({"status": "success", "fan_mode": control.fan_mode})
 
 @api_view(['POST'])
 def receive_data(request):
@@ -230,3 +177,27 @@ def update_fan_status(request):
 
     print(f"Webhook update: device {device_id} set to {state}")
     return Response({"message": "Fan status updated!", "fan_mode": control.fan_mode})
+
+@api_view(['POST'])
+def smartthings_webhook(request):
+    data = request.data
+    lifecycle = data.get('lifecycle')
+
+    if lifecycle == 'CONFIRMATION':
+        confirmation_url = data['confirmationData']['confirmationUrl']
+
+        # Approach (A): Do an HTTP GET to confirmation_url
+        import requests
+        try:
+            resp = requests.get(confirmation_url)
+            if resp.status_code == 200:
+                print("Successfully confirmed SmartApp!")
+            else:
+                print("Confirmation GET failed:", resp.status_code)
+        except Exception as e:
+            print("Error confirming:", e)
+
+        # Return a normal 200 response
+        return Response({"status": "confirmation attempted"}, status=200)
+
+    # ... handle other lifecycle events like PING, INSTALL, etc. ...
