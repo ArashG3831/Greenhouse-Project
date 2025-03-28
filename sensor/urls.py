@@ -16,6 +16,5 @@ urlpatterns = [
     path('api/get_control_state/', get_control_state, name='get_control_state'),
     path('api/set_control_state/', set_control_state, name='set_control_state'),
     path('api/smartthings_webhook/', smartthings_webhook, name='smartthings_webhook'),  # ✅ Added this new
-
-    path('api/update-fan-status/', update_fan_status, name='update_fan_status'),# line
+    path('api/update-fan-status/', update_fan_status, name='update_fan_status'),
 ]

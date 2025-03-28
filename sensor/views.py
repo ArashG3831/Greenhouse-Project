@@ -237,3 +237,4 @@ def update_fan_status(request):
 
     print(f"Webhook update: device {device_id} set to {state}")
     return Response({"message": "Fan status updated!", "fan_mode": control.fan_mode})
+ Response({"message": "Fan status updated!", "fan_mode": control.fan_mode})
