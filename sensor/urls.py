@@ -14,5 +14,5 @@ urlpatterns = [
     path('api/get_predictions/', get_predictions, name='get_predictions'),
     path('api/get_control_state/', get_control_state, name='get_control_state'),
     path('api/set_control_state/', set_control_state, name='set_control_state'),
-    path('api/smartthings/', smartthings_webhook, name='smartthings_webhook'),  # ✅ Added this new line
+    path('api/smartthings_webhook/', smartthings_webhook, name='smartthings_webhook'),  # ✅ Added this new line
 ]
