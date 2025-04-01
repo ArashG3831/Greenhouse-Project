@@ -28,46 +28,39 @@ def get_data(request):
         start_date = None
         group_factor = 2880
 
+    queryset = SensorData.objects.all()
     if start_date:
-        data = list(
-            SensorData.objects.filter(timestamp__gte=start_date)
-            .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
-            .values("group_id")
-            .annotate(
-                timestamp=Min("timestamp"),
-                temperature=Avg("temperature"),
-                humidity=Avg("humidity"),
-                oxygen_level=Avg("oxygen_level"),
-                co2_level=Avg("co2_level"),
-                light_illumination=Avg("light_illumination"),
-            )
-            .order_by("timestamp")
-        )
-    else:
-        data = list(
-            SensorData.objects.all()
-            .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
-            .values("group_id")
-            .annotate(
-                timestamp=Min("timestamp"),
-                temperature=Avg("temperature"),
-                humidity=Avg("humidity"),
-                oxygen_level=Avg("oxygen_level"),
-                co2_level=Avg("co2_level"),
-                light_illumination=Avg("light_illumination"),
-            )
-            .order_by("timestamp")
-        )
+        queryset = queryset.filter(timestamp__gte=start_date)
 
-    latest_entry = (
-        SensorData.objects.order_by('-id').first()
+    # Group and average
+    grouped_data = list(
+        queryset
+        .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
+        .values("group_id")
+        .annotate(
+            timestamp=Min("timestamp"),
+            temperature=Avg("temperature"),
+            humidity=Avg("humidity"),
+            oxygen_level=Avg("oxygen_level"),
+            co2_level=Avg("co2_level"),
+            light_illumination=Avg("light_illumination"),
+        )
+        .order_by("timestamp")
+    )
+
+    # 🔥 Get true latest entry regardless of grouping
+    latest = (
+        SensorData.objects.order_by("-timestamp")
         .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
         .first()
     )
-    if latest_entry and (not data or latest_entry["timestamp"] != data[-1]["timestamp"]):
-        data.append(latest_entry)
 
-    return Response(data)
+    # 🧠 If it's newer than the last grouped timestamp, add it separately
+    if latest and (not grouped_data or latest["timestamp"] > grouped_data[-1]["timestamp"]):
+        grouped_data.append(latest)
+
+    return Response(grouped_data)
+
 
 @api_view(['POST'])
 def set_control_state(request):
