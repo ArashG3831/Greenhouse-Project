@@ -60,7 +60,7 @@ def get_data(request):
         )
 
     latest_entry = (
-        SensorData.objects.order_by("-timestamp")
+        SensorData.objects.order_by('-id').first()
         .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
         .first()
     )
