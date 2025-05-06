@@ -1,5 +1,16 @@
 from django.db import models
 
+class SensorPrediction(models.Model):
+    timestamp = models.DateTimeField()
+    temperature = models.FloatField()
+    humidity = models.FloatField()
+    oxygen_level = models.FloatField()
+    co2_level = models.FloatField()
+    light_illumination = models.FloatField()
+
+    def __str__(self):
+        return f"[Prediction @ {self.timestamp}] T={self.temperature} H={self.humidity} O2={self.oxygen_level}"
+
 class SensorData(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     temperature = models.FloatField()
