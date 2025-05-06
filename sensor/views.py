@@ -83,6 +83,22 @@ def receive_data(request):
         print("❌ Error:", str(e))
         return Response({"error": str(e)}, status=500)
 
+@api_view(['GET'])
+def get_predictions(request):
+    try:
+        # Fetch the latest 24 prediction entries
+        predictions = (
+            SensorPrediction.objects.order_by("-timestamp")[:24]
+            .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
+        )
+
+        # Return as a list (in chronological order)
+        return Response(list(reversed(predictions)))
+
+    except Exception as e:
+        print("❌ Error in get_predictions:", str(e))
+        return Response({"error": str(e)}, status=500)
+
 
 @api_view(['GET'])
 def get_control_state(request):
