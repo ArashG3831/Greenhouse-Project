@@ -4,9 +4,9 @@ from .views import (
     set_control_state,
     get_data,
     receive_data,
-    get_predictions,
-    update_fan_status,
-    smartthings_webhook  # ✅ Added import for new webhook
+    # get_predictions,
+    # update_fan_status,
+    # smartthings_webhook  # ✅ Added import for new webhook
 )
 
 urlpatterns = [
