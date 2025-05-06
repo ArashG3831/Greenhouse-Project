@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import JsonResponse
 from django.utils import timezone
-from .models import SensorData, ControlState
+from .models import SensorData, ControlState, SensorPrediction
 
 
 @api_view(['GET'])
