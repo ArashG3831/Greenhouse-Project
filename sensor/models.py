@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 class SensorPrediction(models.Model):
     timestamp = models.DateTimeField()
@@ -12,7 +13,7 @@ class SensorPrediction(models.Model):
         return f"[Prediction @ {self.timestamp}] T={self.temperature} H={self.humidity} O2={self.oxygen_level}"
 
 class SensorData(models.Model):
-    timestamp = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(default=timezone.now)
     temperature = models.FloatField()
     humidity = models.FloatField()
     oxygen_level = models.FloatField()
