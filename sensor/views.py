@@ -43,7 +43,7 @@ def get_data(request):
             co2_level=Avg("co2_level"),
             light_illumination=Avg("light_illumination"),
         )
-        .order_by("timestamp")
+        .order_by("minute_bucket")
     )
 
     # Get latest true timestamp for front-end "last updated"
