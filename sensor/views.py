@@ -8,6 +8,7 @@ from django.utils import timezone
 from .models import SensorData, SensorPrediction, ControlState
 from django.utils.timezone import now
 from zoneinfo import ZoneInfo
+from django.db.models import Max
 
 @api_view(['GET'])
 def get_data(request):
