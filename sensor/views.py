@@ -54,7 +54,7 @@ def get_data(request):
     )
 
     return Response({
-        "data": list(data_queryset),
+        "data": list(queryset),
         "latest_timestamp": latest_ts
     })
 
