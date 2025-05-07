@@ -36,7 +36,7 @@ def get_data(request):
         ))
         .values("minute_bucket")
         .annotate(
-            timestamp=Max("timestamp"),
+            timestamp=Min("timestamp"),
             temperature=Avg("temperature"),
             humidity=Avg("humidity"),
             oxygen_level=Avg("oxygen_level"),
