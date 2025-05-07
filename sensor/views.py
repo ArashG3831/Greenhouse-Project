@@ -60,7 +60,7 @@ def receive_data(request):
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
         entry = SensorData.objects.create(
-            timestamp=now().astimezone(ZoneInfo("Asia/Tehran")),
+            timestamp=now(),
             temperature=data["temperature"],
             humidity=data["humidity"],
             oxygen_level=data["oxygen_level"],
