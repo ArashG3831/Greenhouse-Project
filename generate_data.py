@@ -57,7 +57,7 @@ for i in range(NUM_ENTRIES):
     light = max(200, min(light, 1200))
 
     row = (
-        current_time.strftime("%Y-%m-%d %H:%M:%S"),
+        current_time,
         round(temperature, 2),
         round(humidity, 2),
         round(oxygen, 2),
