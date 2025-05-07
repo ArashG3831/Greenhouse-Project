@@ -1,39 +1,36 @@
-from django.utils.timezone import now, timedelta
-from django.db.models import Avg, F, Min, ExpressionWrapper, IntegerField
+from django.db.models import Avg, Min
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.http import JsonResponse
-from django.utils import timezone
-from .models import SensorData, ControlState, SensorPrediction
+from django.utils.timezone import now, timedelta
+from .models import SensorData
+from django.db.models.expressions import RawSQL
 
 
 @api_view(['GET'])
 def get_data(request):
     time_range = request.GET.get('range', '7d')
-    group_factor = 720
-    start_date = None
 
-    if time_range == '1h':
-        start_date = now() - timedelta(hours=1)
-        group_factor = 36
-    elif time_range == '24h':
-        start_date = now() - timedelta(hours=24)
-        group_factor = 720
-    elif time_range == '7d':
-        start_date = now() - timedelta(days=7)
-        group_factor = 720
-    elif time_range == '30d':
-        start_date = now() - timedelta(days=30)
-        group_factor = 2880
+    now_time = now()
 
-    queryset = SensorData.objects.all()
-    if start_date:
-        queryset = queryset.filter(timestamp__gte=start_date)
+    # Define the start time and downsampling interval (in minutes)
+    ranges = {
+        '1h': (now_time - timedelta(hours=1), 1),  # No downsampling
+        '24h': (now_time - timedelta(hours=24), 5),  # Group every 5 minutes
+        '7d': (now_time - timedelta(days=7), 30),  # Group every 30 minutes
+        '30d': (now_time - timedelta(days=30), 60),  # Group hourly
+    }
 
-    grouped_data = list(
-        queryset
-        .annotate(group_id=ExpressionWrapper(F("id") / group_factor, output_field=IntegerField()))
-        .values("group_id")
+    start_date, group_minutes = ranges.get(time_range, (now_time - timedelta(days=7), 30))
+
+    # Use time-flooring SQL-level truncation for grouping
+    queryset = (
+        SensorData.objects
+        .filter(timestamp__gte=start_date)
+        .annotate(minute_bucket=RawSQL(
+            "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(timestamp) / %s) * %s)",
+            (group_minutes * 60, group_minutes * 60)
+        ))
+        .values("minute_bucket")
         .annotate(
             timestamp=Min("timestamp"),
             temperature=Avg("temperature"),
@@ -45,16 +42,7 @@ def get_data(request):
         .order_by("timestamp")
     )
 
-    latest = (
-        SensorData.objects.order_by("-timestamp")
-        .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
-        .first()
-    )
-
-    if latest and (not grouped_data or latest["timestamp"] > grouped_data[-1]["timestamp"]):
-        grouped_data.append(latest)
-
-    return Response(grouped_data)
+    return Response(list(queryset))
 
 
 @api_view(['POST'])
