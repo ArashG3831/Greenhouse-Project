@@ -1,9 +1,11 @@
-from django.db.models import Avg, Min
+from django.utils.timezone import now, timedelta
+from django.db.models import Avg, F, Min, ExpressionWrapper, IntegerField
+from django.db.models.expressions import RawSQL
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.utils.timezone import now, timedelta
-from .models import SensorData
-from django.db.models.expressions import RawSQL
+from django.http import JsonResponse
+from django.utils import timezone
+from .models import SensorData, SensorPrediction, ControlState
 
 
 @api_view(['GET'])
