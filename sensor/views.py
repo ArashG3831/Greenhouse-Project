@@ -46,7 +46,17 @@ def get_data(request):
         .order_by("timestamp")
     )
 
-    return Response(list(queryset))
+    # Get latest true timestamp for front-end "last updated"
+    latest_ts = (
+        SensorData.objects
+        .latest("timestamp")
+        .timestamp
+    )
+
+    return Response({
+        "data": list(data_queryset),
+        "latest_timestamp": latest_ts
+    })
 
 
 @api_view(['POST'])
