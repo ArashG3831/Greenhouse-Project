@@ -6,7 +6,8 @@ from rest_framework.response import Response
 from django.http import JsonResponse
 from django.utils import timezone
 from .models import SensorData, SensorPrediction, ControlState
-
+from django.utils.timezone import now
+from zoneinfo import ZoneInfo
 
 @api_view(['GET'])
 def get_data(request):
@@ -59,6 +60,7 @@ def receive_data(request):
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
         entry = SensorData.objects.create(
+            timestamp=now().astimezone(ZoneInfo("Asia/Tehran")),
             temperature=data["temperature"],
             humidity=data["humidity"],
             oxygen_level=data["oxygen_level"],
