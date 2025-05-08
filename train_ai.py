@@ -70,12 +70,13 @@ model = Sequential([
 ])
 model.compile(optimizer='adam', loss='mse')
 
-# -- 9) TRAIN
+# -- 9) TRAIN (dynamic batch size)
+batch_size = min(8, len(X_train))
 model.fit(
     X_train, Y_train,
-    validation_data=(X_val, Y_val),
+    validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
     epochs=30,
-    batch_size=8,
+    batch_size=batch_size,
     verbose=1
 )
 
