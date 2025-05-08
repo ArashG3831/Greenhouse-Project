@@ -6,7 +6,7 @@ import pandas as pd
 from django.db import transaction
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras import Sequential, Input
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import GRU, Dense
 from tensorflow.keras.optimizers import Adam
 
 # Django setup
@@ -15,11 +15,12 @@ django.setup()
 from sensor.models import SensorData, SensorPrediction
 
 # ---------------- CONFIG ----------------
-MAX_LOOKBACK_STEPS   = 7 * 24 * 60      # max 7 days = 10,080
-FORECAST_STEPS       = 24 * 60          # predict 1440 min (24h)
-EPOCHS               = 3
-BATCH_SIZE           = 4
-MIN_SAMPLES          = 20
+MAX_LOOKBACK        = 7 * 24 * 60      # 7 days (in minutes)
+FORECAST_STEPS      = 1440            # predict 1440 minutes (1 day)
+EPOCHS              = 3
+BATCH_SIZE          = 4
+MIN_SEQUENCES       = 100             # at least this many training samples
+MIN_LOOKBACK        = 60              # minimum 1 hour of history
 
 SENSOR_COLS = [
     "temperature", "humidity", "oxygen_level",
@@ -35,11 +36,11 @@ df.set_index("timestamp", inplace=True)
 df = df.resample("1min").mean().dropna()
 
 available_rows = len(df)
-if available_rows < MIN_SAMPLES + 1:
-    raise RuntimeError("❌ Not enough data.")
+if available_rows < MIN_SEQUENCES + 1:
+    raise RuntimeError("❌ Not enough data to train a model.")
 
-# ---------------- DYNAMIC LOOKBACK ----------------
-lookback = min(MAX_LOOKBACK_STEPS, available_rows - MIN_SAMPLES)
+# ---------------- DYNAMIC LOOK-BACK ----------------
+lookback = max(MIN_LOOKBACK, min(MAX_LOOKBACK, available_rows - MIN_SEQUENCES))
 print(f"DEBUG • lookback: {lookback} min, rows: {available_rows}")
 
 # ---------------- SCALE + SEQUENCES ----------------
@@ -53,15 +54,17 @@ for i in range(len(scaled) - lookback):
     Y.append(scaled[i+lookback])
 X, Y = np.array(X), np.array(Y)
 
-# ---------------- BASELINE OR LSTM ----------------
-if len(X) < MIN_SAMPLES:
-    print("⚠️ Not enough training samples. Using baseline.")
+print(f"DEBUG • Training samples: {len(X)}, input shape: {X.shape}")
+
+# ---------------- BASELINE OR GRU ----------------
+if len(X) < MIN_SEQUENCES:
+    print("⚠️ Not enough training samples. Using last value baseline.")
     last_obs = df.iloc[-1].to_numpy()
     predictions = np.tile(last_obs, (FORECAST_STEPS, 1))
 else:
     model = Sequential([
         Input(shape=(lookback, len(SENSOR_COLS))),
-        LSTM(32, activation="tanh"),
+        GRU(32, activation="tanh"),
         Dense(len(SENSOR_COLS))
     ])
     model.compile(optimizer=Adam(clipnorm=1.0), loss="mse")
@@ -74,7 +77,7 @@ else:
         pred_scaled.append(p)
         seq = np.vstack([seq[1:], p])
     predictions = scaler.inverse_transform(np.array(pred_scaled))
-    predictions += data[-1] - predictions[0]
+    predictions += data[-1] - predictions[0]  # continuity shift
 
 # ---------------- CLAMP TEMP + SAVE HOURLY ----------------
 predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
