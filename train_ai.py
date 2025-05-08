@@ -69,8 +69,7 @@ model = Sequential([
     LSTM(64, activation='relu'),
     Dense(len(sensor_cols))
 ])
-model.add(LSTM(64, activation='relu', input_shape=(LOOKBACK, len(sensor_cols))))
-model.add(Dense(len(sensor_cols)))
+
 model.compile(optimizer='adam', loss='mse')
 
 model.fit(
