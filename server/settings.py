@@ -64,11 +64,11 @@ DATABASES = {
         'PORT': os.environ.get('DB_PORT', '3306'),
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'pool_name': 'greenhouse_pool',
-            'pool_size': 10,  # Adjust as needed for more concurrency
-        },
+            # ❌ REMOVE pool_name and pool_size – they crash MySQLdb
+        }
     }
 }
+
 
 
 AUTH_PASSWORD_VALIDATORS = [
