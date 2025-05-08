@@ -63,9 +63,10 @@ split_idx = int(0.8 * len(X))
 X_train, X_val = X[:split_idx], X[split_idx:]
 Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-if len(X_train) < 1:
-    print(f"⚠️ Not enough sequences to train. Got only {len(X)} sequence(s). Skipping model training.")
-    predictions = np.repeat(data[-1][np.newaxis, :], 24, axis=0)  # naive repeat of last known value
+if X_train.shape[0] < 1 or X_train.ndim != 3 or X_train.shape[1:] != (LOOKBACK, len(sensor_cols)):
+    print(f"⚠️ Skipping training due to insufficient or invalid shape: {X_train.shape}")
+    predictions = np.repeat(data[-1][np.newaxis, :], 24, axis=0)
+
 else:
     # -- 8) BUILD MODEL
     model = Sequential([
