@@ -54,46 +54,51 @@ def create_sequences(dataset, lookback):
     return np.array(X), np.array(Y)
 
 X, Y = create_sequences(scaled_data, LOOKBACK)
-# If too small to split, use all for training
-if len(X) < 5:
-    X_train, Y_train = X, Y
-    X_val, Y_val = X[:0], Y[:0]  # empty
-else:
-    split_idx = int(0.8 * len(X))
-    X_train, X_val = X[:split_idx], X[split_idx:]
-    Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-# -- NOT ENOUGH DATA TO TRAIN, FALLBACK
+# -- SPLIT OR FALLBACK
 if len(X) < 1:
     print("⚠️ Not enough sequences. Using fallback repetition strategy.")
-    fallback = data[-1]  # last known value
+    fallback = data[-1]
     predictions = np.repeat(fallback[np.newaxis, :], PREDICT_HOURS, axis=0)
 else:
-    # -- BUILD MODEL
-    model = Sequential([
-        Input(shape=(LOOKBACK, len(sensor_cols))),
-        LSTM(64, activation='relu'),
-        Dense(len(sensor_cols))
-    ])
-    model.compile(optimizer='adam', loss='mse')
+    if len(X) < 5:
+        X_train, Y_train = X, Y
+        X_val, Y_val = X[:0], Y[:0]
+    else:
+        split_idx = int(0.8 * len(X))
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-    # -- TRAIN (no val split if tiny data)
-    model.fit(X_train, Y_train,
-              validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
-              epochs=30, batch_size=min(8, len(X_train)), verbose=1)
+    if X_train.ndim != 3 or X_train.shape[1:] != (LOOKBACK, len(sensor_cols)):
+        print(f"⚠️ Invalid training shape: {X_train.shape}. Using fallback.")
+        fallback = data[-1]
+        predictions = np.repeat(fallback[np.newaxis, :], PREDICT_HOURS, axis=0)
+    else:
+        # -- BUILD MODEL
+        model = Sequential([
+            Input(shape=(LOOKBACK, len(sensor_cols))),
+            LSTM(64, activation='relu'),
+            Dense(len(sensor_cols))
+        ])
+        model.compile(optimizer='adam', loss='mse')
 
-    # -- PREDICT
-    last_seq = scaled_data[-LOOKBACK:]
-    current_seq = last_seq.copy()
-    predictions_scaled = []
+        # -- TRAIN
+        model.fit(X_train, Y_train,
+                  validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
+                  epochs=30, batch_size=min(8, len(X_train)), verbose=1)
 
-    for _ in range(PREDICT_HOURS):
-        pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
-        predictions_scaled.append(pred)
-        current_seq = np.vstack([current_seq[1:], pred])
+        # -- PREDICT
+        last_seq = scaled_data[-LOOKBACK:]
+        current_seq = last_seq.copy()
+        predictions_scaled = []
 
-    predictions_scaled = np.array(predictions_scaled)
-    predictions = scaler.inverse_transform(predictions_scaled)
+        for _ in range(PREDICT_HOURS):
+            pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
+            predictions_scaled.append(pred)
+            current_seq = np.vstack([current_seq[1:], pred])
+
+        predictions_scaled = np.array(predictions_scaled)
+        predictions = scaler.inverse_transform(predictions_scaled)
 
 # -- CONTINUITY SHIFT
 last_real = df_hourly.iloc[-1].values
