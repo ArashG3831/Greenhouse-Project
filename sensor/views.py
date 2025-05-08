@@ -48,7 +48,11 @@ def get_data(request):
 @api_view(['GET'])
 def get_latest(request):
     try:
-        latest = SensorData.objects.latest("timestamp")
+        latest = SensorData.objects.order_by("-timestamp").first()
+
+        if not latest:
+            return Response({"error": "No sensor data available."}, status=404)
+
         return Response({
             "timestamp": latest.timestamp,
             "temperature": latest.temperature,
@@ -57,12 +61,10 @@ def get_latest(request):
             "co2_level": latest.co2_level,
             "light_illumination": latest.light_illumination,
         })
-    except SensorData.DoesNotExist:
-        return Response({"error": "No sensor data available."}, status=404)
+
     except Exception as e:
         print("❌ Error in get_latest:", str(e))
         return Response({"error": str(e)}, status=500)
-
 
 @api_view(['POST'])
 def receive_data(request):
