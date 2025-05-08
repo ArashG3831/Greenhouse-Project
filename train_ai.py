@@ -1,121 +1,110 @@
-"""
-train_ai.py – robust even with just a handful of hourly rows
-"""
-
-import os, django
-from datetime import timedelta
+import os
+import django
+import random
+from datetime import datetime, timedelta
 
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras import Input
 
-# ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-LOOKBACK       = 24          # hours per input window
-PREDICT_HOURS  = 24          # hours to forecast
-SENSOR_COLS    = ["temperature", "humidity",
-                  "oxygen_level", "co2_level", "light_illumination"]
-
-# ─── DJANGO SET-UP ─────────────────────────────────────────────────────────────
+# Setup Django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
 django.setup()
 
 from sensor.models import SensorData, SensorPrediction
 
-# ─── LOAD & PRE-PROCESS ────────────────────────────────────────────────────────
+# -- 1) LOAD DATA FROM DB
 qs = SensorData.objects.all().order_by("timestamp")
-df = pd.DataFrame.from_records(
-         qs.values("timestamp", *SENSOR_COLS) )
-
-if df.empty:
-    print("🚫  No sensor data in DB – nothing to train.")
-    exit()
-
+df = pd.DataFrame.from_records(qs.values(
+    "timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"
+))
 df["timestamp"] = pd.to_datetime(df["timestamp"])
 df.set_index("timestamp", inplace=True)
 df.sort_index(inplace=True)
 
-# hourly mean, forward/backward fill gaps
-df_h = (df.resample("h").mean()
-          .fillna(method="ffill")
-          .fillna(method="bfill"))
+# -- 2) RESAMPLE HOURLY & FILTER LAST 7 DAYS
+df_hourly = df.resample("h").mean().dropna()
+seven_days_ago = df_hourly.index.max() - pd.Timedelta(days=7)
+df_hourly = df_hourly.loc[df_hourly.index >= seven_days_ago]
 
-# keep only what we need
-df_h = df_h.tail(LOOKBACK + PREDICT_HOURS)
-data  = df_h[SENSOR_COLS].values           # shape: n_hours × 5
+sensor_cols = ["temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"]
+data = df_hourly[sensor_cols].values
 
-# ─── SCALING ───────────────────────────────────────────────────────────────────
-scaler      = MinMaxScaler()
+# -- 3) SCALE DATA
+scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
-# ─── BUILD SEQUENCES ───────────────────────────────────────────────────────────
-def build_sequences(arr, lookback):
-    """Return X (n_seq×lookback×feat)  and  Y (n_seq×feat)."""
-    seqs, targets = [], []
-    for i in range(len(arr) - lookback):
-        seqs.append(arr[i:i+lookback])
-        targets.append(arr[i+lookback])
-    if not seqs:                            # zero sequences
-        return np.empty((0, lookback, len(SENSOR_COLS))), np.empty((0,len(SENSOR_COLS)))
-    # Force proper stacking – raises if shapes differ
-    return np.stack(seqs).astype("float32"), np.stack(targets).astype("float32")
+# -- 4) CREATE SEQUENCES (LOOKBACK=24 HOURS)
+LOOKBACK = 24
+def create_sequences(dataset, lookback=24):
+    X, Y = [], []
+    for i in range(len(dataset) - lookback):
+        X.append(dataset[i : i + lookback])
+        Y.append(dataset[i + lookback])
+    return np.array(X), np.array(Y)
 
-try:
-    X, Y = build_sequences(scaled_data, LOOKBACK)
-except ValueError as e:                     # variable-length rows → fallback
-    print(f"⚠️  Irregular sequence shapes ({e}).  Falling back.")
-    X, Y = np.empty((0,LOOKBACK,len(SENSOR_COLS))), np.empty((0,len(SENSOR_COLS)))
+X, Y = create_sequences(scaled_data, LOOKBACK)
 
-# ───  Fallback if we still cannot train ────────────────────────────────────────
-if X.shape[0] < 1:
-    print("⚠️  Not enough clean sequences – repeating last value for forecast.")
-    predictions = np.repeat(data[-1][None, :], PREDICT_HOURS, axis=0)
+# -- 5) TRAIN/VAL SPLIT
+split_idx = int(0.8 * len(X))
+X_train, X_val = X[:split_idx], X[split_idx:]
+Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-else:
-    # ─── SIMPLE LSTM  ──────────────────────────────────────────────────────────
-    model = Sequential([
-        Input(shape=(LOOKBACK, len(SENSOR_COLS))),
-        LSTM(64, activation="relu"),
-        Dense(len(SENSOR_COLS))
-    ])
-    model.compile(optimizer="adam", loss="mse")
+# -- 6) BUILD & TRAIN MODEL
+model = Sequential()
+model.add(LSTM(64, activation='relu', input_shape=(LOOKBACK, len(sensor_cols))))
+model.add(Dense(len(sensor_cols)))
+model.compile(optimizer='adam', loss='mse')
 
-    model.fit(X, Y,
-              epochs=30,
-              batch_size=min(8, X.shape[0]),
-              verbose=1)
+model.fit(
+    X_train, Y_train,
+    validation_data=(X_val, Y_val),
+    epochs=30,
+    batch_size=8,
+    verbose=1
+)
 
-    # ─── AUTOREGRESSIVE FORECAST  ─────────────────────────────────────────────
-    seq = scaled_data[-LOOKBACK:]           # last 24 h, shape (24×5)
-    preds_scaled = []
-    for _ in range(PREDICT_HOURS):
-        p = model.predict(seq[None, :, :], verbose=0)[0]   # 1×5 → 5
-        preds_scaled.append(p)
-        seq = np.vstack([seq[1:], p])       # slide window
+# -- 7) PREDICT NEXT 24 HOURS
+last_24 = scaled_data[-LOOKBACK:]
+current_seq = last_24.copy()
+predictions_scaled = []
 
-    predictions = scaler.inverse_transform(np.array(preds_scaled))
+for _ in range(24):
+    pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
+    predictions_scaled.append(pred)
+    current_seq = np.vstack([current_seq[1:], pred])
 
-# ─── CONTINUITY & CLAMP ────────────────────────────────────────────────────────
-shift = df_h.iloc[-1].values - predictions[0]
-predictions += shift
-predictions[:,0] = np.clip(predictions[:,0], 15, 40)       # temp
+predictions_scaled = np.array(predictions_scaled)
+predictions = scaler.inverse_transform(predictions_scaled)
 
-# ─── SAVE 24-H FORECAST ────────────────────────────────────────────────────────
+# -- 8) CONTINUITY: SHIFT TO MATCH LAST REAL VALUE
+last_real = df_hourly.iloc[-1].values
+diff = last_real - predictions[0]
+predictions += diff
+
+# -- 9) CLAMP TEMPERATURE RANGE
+predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
+
+# -- 10) SAVE TO SENSORPREDICTION TABLE
 SensorPrediction.objects.all().delete()
-start_ts = df_h.index[-1]
-rows = [
-    SensorPrediction(
-        timestamp=start_ts + timedelta(hours=i+1),
-        temperature       = round(r[0], 2),
-        humidity          = round(r[1], 2),
-        oxygen_level      = round(r[2], 2),
-        co2_level         = round(r[3], 2),
-        light_illumination= round(r[4], 2),
-    )
-    for i, r in enumerate(predictions)
-]
-SensorPrediction.objects.bulk_create(rows, batch_size=len(rows))
 
-print("✅ 24-hour forecast generated and saved.")
+last_ts = df_hourly.index[-1]
+timestamps = [last_ts + timedelta(hours=i+1) for i in range(24)]
+
+records = [
+    SensorPrediction(
+        timestamp=ts,
+        temperature=round(row[0], 2),
+        humidity=round(row[1], 2),
+        oxygen_level=round(row[2], 2),
+        co2_level=round(row[3], 2),
+        light_illumination=round(row[4], 2)
+    )
+    for ts, row in zip(timestamps, predictions)
+]
+
+SensorPrediction.objects.bulk_create(records, batch_size=24)
+
+print("✅ Predictions saved in MySQL via Django ORM (24h forecast).")
