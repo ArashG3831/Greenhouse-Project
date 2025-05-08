@@ -54,6 +54,14 @@ def create_sequences(dataset, lookback):
     return np.array(X), np.array(Y)
 
 X, Y = create_sequences(scaled_data, LOOKBACK)
+# If too small to split, use all for training
+if len(X) < 5:
+    X_train, Y_train = X, Y
+    X_val, Y_val = X[:0], Y[:0]  # empty
+else:
+    split_idx = int(0.8 * len(X))
+    X_train, X_val = X[:split_idx], X[split_idx:]
+    Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
 # -- NOT ENOUGH DATA TO TRAIN, FALLBACK
 if len(X) < 1:
