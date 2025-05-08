@@ -51,8 +51,9 @@ def create_sequences(dataset, lookback=24):
     return np.array(X), np.array(Y)
 
 X, Y = create_sequences(scaled_data, LOOKBACK)
-if len(X) == 0:
-    print("⚠️ Not enough data to train the AI model. Skipping prediction.")
+
+if len(X) == 0 or X.ndim != 3:
+    print(f"⚠️ Not enough data to train. Required shape: (samples, {LOOKBACK}, {len(sensor_cols)}), got: {X.shape}")
     exit(0)
 
 # -- 5) TRAIN/VAL SPLIT
