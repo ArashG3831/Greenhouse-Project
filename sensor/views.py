@@ -1,32 +1,28 @@
 from django.utils.timezone import now, timedelta
-from django.db.models import Avg, F, Min, ExpressionWrapper, IntegerField
+from django.db.models import Avg, Min
 from django.db.models.expressions import RawSQL
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.http import JsonResponse
 from django.utils import timezone
 from .models import SensorData, SensorPrediction, ControlState
-from django.utils.timezone import now
-from zoneinfo import ZoneInfo
-from django.db.models import Max
+from django.views.decorators.cache import cache_page
+
+# ----------------------- Sensor Data API -----------------------
 
 @api_view(['GET'])
 def get_data(request):
     time_range = request.GET.get('range', '7d')
-
     now_time = now()
 
-    # Define the start time and downsampling interval (in minutes)
-    ranges = {
-        '1h': (now_time - timedelta(hours=1), 1),  # No downsampling
-        '24h': (now_time - timedelta(hours=24), 5),  # Group every 5 minutes
-        '7d': (now_time - timedelta(days=7), 30),  # Group every 30 minutes
-        '30d': (now_time - timedelta(days=30), 60),  # Group hourly
+    range_map = {
+        '1h':  (now_time - timedelta(hours=1), 1),
+        '24h': (now_time - timedelta(hours=24), 5),
+        '7d':  (now_time - timedelta(days=7), 30),
+        '30d': (now_time - timedelta(days=30), 60),
     }
 
-    start_date, group_minutes = ranges.get(time_range, (now_time - timedelta(days=7), 30))
+    start_date, group_minutes = range_map.get(time_range, range_map['7d'])
 
-    # Use time-flooring SQL-level truncation for grouping
     queryset = (
         SensorData.objects
         .filter(timestamp__gte=start_date)
@@ -46,17 +42,8 @@ def get_data(request):
         .order_by("minute_bucket")
     )
 
-    # Get latest true timestamp for front-end "last updated"
-    latest_ts = (
-        SensorData.objects
-        .latest("timestamp")
-        .timestamp
-    )
+    return Response({"data": list(queryset)})
 
-    return Response({
-        "data": list(queryset),
-        "latest_timestamp": latest_ts
-    })
 
 @api_view(['GET'])
 def get_latest(request):
@@ -76,14 +63,14 @@ def get_latest(request):
         print("❌ Error in get_latest:", str(e))
         return Response({"error": str(e)}, status=500)
 
+
 @api_view(['POST'])
 def receive_data(request):
     try:
         data = request.data
         print("🔥 Received data:", data)
 
-        required_fields = ["temperature", "humidity", "oxygen_level", "light_illumination"]
-        for field in required_fields:
+        for field in ["temperature", "humidity", "oxygen_level", "light_illumination"]:
             if field not in data:
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
@@ -100,25 +87,29 @@ def receive_data(request):
         return Response({"message": "Data stored successfully!"})
 
     except Exception as e:
-        print("❌ Error:", str(e))
+        print("❌ Error in receive_data:", str(e))
         return Response({"error": str(e)}, status=500)
 
+
+# ----------------------- Prediction API -----------------------
+
 @api_view(['GET'])
+@cache_page(60)  # cache for 60 seconds
 def get_predictions(request):
     try:
-        # Fetch the latest 24 prediction entries
         predictions = (
-            SensorPrediction.objects.order_by("-timestamp")[:24]
+            SensorPrediction.objects
+            .order_by("-timestamp")[:24]
             .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
         )
-
-        # Return as a list (in chronological order)
         return Response(list(reversed(predictions)))
 
     except Exception as e:
         print("❌ Error in get_predictions:", str(e))
         return Response({"error": str(e)}, status=500)
 
+
+# ----------------------- Control State API -----------------------
 
 @api_view(['GET'])
 def get_control_state(request):

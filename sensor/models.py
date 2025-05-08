@@ -13,7 +13,7 @@ class SensorPrediction(models.Model):
         return f"[Prediction @ {self.timestamp}] T={self.temperature} H={self.humidity} O2={self.oxygen_level}"
 
 class SensorData(models.Model):
-    timestamp = models.DateTimeField(default=timezone.now)
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
     temperature = models.FloatField()
     humidity = models.FloatField()
     oxygen_level = models.FloatField()
