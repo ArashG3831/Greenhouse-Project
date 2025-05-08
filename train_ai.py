@@ -148,10 +148,13 @@ else:
     else:
         model = Sequential([
             Input(shape=(lookback_steps, len(SENSOR_COLS))),
-            LSTM(64, activation="relu"),
+            LSTM(64, activation="tanh"),  # was relu
             Dense(len(SENSOR_COLS)),
         ])
-        model.compile(optimizer="adam", loss="mse")
+        model.compile(
+            optimizer=keras.optimizers.Adam(clipnorm=1.0),  # clip exploding grads
+            loss="mse"
+        )
 
     model.fit(
         X_train,
