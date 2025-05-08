@@ -25,9 +25,14 @@ df.set_index("timestamp", inplace=True)
 df.sort_index(inplace=True)
 
 # -- 2) RESAMPLE HOURLY & FILTER LAST 7 DAYS
-df_hourly = df.resample("h").mean().dropna()
-seven_days_ago = df_hourly.index.max() - pd.Timedelta(days=7)
-df_hourly = df_hourly.loc[df_hourly.index >= seven_days_ago]
+df_hourly = df.resample("h").mean()
+df_hourly = df_hourly.fillna(method="ffill").fillna(method="bfill")  # Fill gaps to prevent dropna
+
+if len(df_hourly) < LOOKBACK + 1:
+    raise ValueError(f"🚫 Not enough hourly data to form a single sequence. Need at least {LOOKBACK + 1} hours.")
+
+# Always use just the most recent LOOKBACK+24 points (1 day + room for prediction)
+df_hourly = df_hourly.tail(LOOKBACK + 24)
 
 sensor_cols = ["temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"]
 data = df_hourly[sensor_cols].values
@@ -46,6 +51,9 @@ def create_sequences(dataset, lookback=24):
     return np.array(X), np.array(Y)
 
 X, Y = create_sequences(scaled_data, LOOKBACK)
+if len(X) == 0:
+    print("⚠️ Not enough data to train the AI model. Skipping prediction.")
+    exit(0)
 
 # -- 5) TRAIN/VAL SPLIT
 split_idx = int(0.8 * len(X))
