@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from .models import SensorData, SensorPrediction, ControlState
 from django.views.decorators.cache import cache_page
+from django.utils.timezone import localtime
 
 # ----------------------- Sensor Data API -----------------------
 
@@ -49,12 +50,11 @@ def get_data(request):
 def get_latest(request):
     try:
         latest = SensorData.objects.order_by("-timestamp").first()
-
         if not latest:
             return Response({"error": "No sensor data available."}, status=404)
 
         return Response({
-            "timestamp": latest.timestamp,
+            "timestamp": localtime(latest.timestamp).isoformat(),  # Ensure it's a proper ISO string
             "temperature": latest.temperature,
             "humidity": latest.humidity,
             "oxygen_level": latest.oxygen_level,
