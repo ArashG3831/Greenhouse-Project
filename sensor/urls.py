@@ -5,11 +5,14 @@ from .views import (
     get_data,
     receive_data,
     get_predictions,
+    get_latest,
     # update_fan_status,
     # smartthings_webhook  # ✅ Added import for new webhook
 )
 
 urlpatterns = [
+    path('api/get_latest', get_latest),
+
     path('api/get_data/', get_data, name='get_data'),
     path('api/receive_data/', receive_data, name='receive_data'),
     path("api/get_predictions/", get_predictions, name="get_predictions"),
