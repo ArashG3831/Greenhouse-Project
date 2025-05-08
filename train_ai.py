@@ -79,11 +79,25 @@ if available_rows < 2:
     raise RuntimeError("After resampling, not enough data to continue.")
 
 # ---------------------------------------------------------------------
-# 3. DYNAMIC LOOK-BACK WINDOW (≤ 7 days)
+# 3. DYNAMIC LOOK-BACK WINDOW  ← REPLACE THIS WHOLE SECTION
 # ---------------------------------------------------------------------
-lookback_steps = min(MAX_LOOKBACK_STEPS, available_rows - 1)
-print(f"DEBUG • using look-back of {lookback_steps} minutes "
-      f"({lookback_steps / 60:.1f} h)")
+MIN_SEQS_FOR_LSTM = 10                # keep it configurable
+
+if available_rows <= MIN_SEQS_FOR_LSTM:
+    raise RuntimeError(
+        f"Need > {MIN_SEQS_FOR_LSTM} rows to train, have {available_rows}."
+    )
+
+lookback_steps = min(
+    MAX_LOOKBACK_STEPS,
+    available_rows - MIN_SEQS_FOR_LSTM  # leave enough rows for training
+)
+
+print(
+    f"DEBUG • look-back = {lookback_steps} steps "
+    f"({lookback_steps/60:.1f} h), "
+    f"training sequences = {available_rows - lookback_steps}"
+)
 
 # ---------------------------------------------------------------------
 # 4. SCALE FEATURES
