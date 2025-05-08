@@ -1,110 +1,75 @@
-import os
-import django
-import random
-from datetime import datetime, timedelta
+# -----------------------------------------------------------------
+# 0) CONFIG -- tweak these two knobs only
+MAX_LOOKBACK        = 24    # what you want when you have ≥ 25 hourly rows
+MIN_SEQS_FOR_LSTM   = 10    # need this many training samples to bother
+# -----------------------------------------------------------------
 
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+available_rows = len(df_hourly)
+if available_rows < 2:                       # 1 hourly row ⇒ nonsense
+    raise ValueError("Need ≥ 2 hourly rows, have {available_rows}")
 
-# Setup Django
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
-django.setup()
+# 1) Dynamically shrink look-back so we always have at least 1 training sample
+LOOKBACK = max(1, min(MAX_LOOKBACK, available_rows - 1))
 
-from sensor.models import SensorData, SensorPrediction
+sensor_cols = ["temperature", "humidity", "oxygen_level",
+               "co2_level", "light_illumination"]
+data   = df_hourly[sensor_cols].to_numpy()
 
-# -- 1) LOAD DATA FROM DB
-qs = SensorData.objects.all().order_by("timestamp")
-df = pd.DataFrame.from_records(qs.values(
-    "timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"
-))
-df["timestamp"] = pd.to_datetime(df["timestamp"])
-df.set_index("timestamp", inplace=True)
-df.sort_index(inplace=True)
-
-# -- 2) RESAMPLE HOURLY & FILTER LAST 7 DAYS
-df_hourly = df.resample("h").mean().dropna()
-seven_days_ago = df_hourly.index.max() - pd.Timedelta(days=7)
-df_hourly = df_hourly.loc[df_hourly.index >= seven_days_ago]
-
-sensor_cols = ["temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"]
-data = df_hourly[sensor_cols].values
-
-# -- 3) SCALE DATA
+# 2) Scale
 scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(data)
+scaled = scaler.fit_transform(data)
 
-# -- 4) CREATE SEQUENCES (LOOKBACK=24 HOURS)
-LOOKBACK = 24
-def create_sequences(dataset, lookback=24):
+# 3) Build (X, Y) sequences
+def make_xy(arr, lkbk):
     X, Y = [], []
-    for i in range(len(dataset) - lookback):
-        X.append(dataset[i : i + lookback])
-        Y.append(dataset[i + lookback])
-    return np.array(X), np.array(Y)
+    for i in range(len(arr) - lkbk):
+        X.append(arr[i:i+lkbk])
+        Y.append(arr[i+lkbk])
+    return np.asarray(X), np.asarray(Y)
 
-X, Y = create_sequences(scaled_data, LOOKBACK)
+X, Y = make_xy(scaled, LOOKBACK)
 
-# -- 5) TRAIN/VAL SPLIT
-split_idx = int(0.8 * len(X))
-X_train, X_val = X[:split_idx], X[split_idx:]
-Y_train, Y_val = Y[:split_idx], Y[split_idx:]
-
-# -- 6) BUILD & TRAIN MODEL
-model = Sequential()
-model.add(LSTM(64, activation='relu', input_shape=(LOOKBACK, len(sensor_cols))))
-model.add(Dense(len(sensor_cols)))
-model.compile(optimizer='adam', loss='mse')
-
-model.fit(
-    X_train, Y_train,
-    validation_data=(X_val, Y_val),
-    epochs=30,
-    batch_size=8,
-    verbose=1
-)
-
-# -- 7) PREDICT NEXT 24 HOURS
-last_24 = scaled_data[-LOOKBACK:]
-current_seq = last_24.copy()
-predictions_scaled = []
-
-for _ in range(24):
-    pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
-    predictions_scaled.append(pred)
-    current_seq = np.vstack([current_seq[1:], pred])
-
-predictions_scaled = np.array(predictions_scaled)
-predictions = scaler.inverse_transform(predictions_scaled)
-
-# -- 8) CONTINUITY: SHIFT TO MATCH LAST REAL VALUE
-last_real = df_hourly.iloc[-1].values
-diff = last_real - predictions[0]
-predictions += diff
-
-# -- 9) CLAMP TEMPERATURE RANGE
-predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
-
-# -- 10) SAVE TO SENSORPREDICTION TABLE
-SensorPrediction.objects.all().delete()
-
-last_ts = df_hourly.index[-1]
-timestamps = [last_ts + timedelta(hours=i+1) for i in range(24)]
-
-records = [
-    SensorPrediction(
-        timestamp=ts,
-        temperature=round(row[0], 2),
-        humidity=round(row[1], 2),
-        oxygen_level=round(row[2], 2),
-        co2_level=round(row[3], 2),
-        light_illumination=round(row[4], 2)
+# 4) Decide: train real model or fall back to “repeat last value”
+if len(X) < MIN_SEQS_FOR_LSTM:
+    # ---------- baseline ----------
+    print(
+        f"⚠️  Only {len(X)} training samples. "
+        "Skipping LSTM; using persistence baseline."
     )
-    for ts, row in zip(timestamps, predictions)
-]
+    last_obs    = df_hourly.iloc[-1][sensor_cols].to_numpy()
+    predictions = np.tile(last_obs, (24, 1))          # 24 identical rows
+else:
+    # ---------- LSTM ----------
+    split = int(0.8 * len(X))
+    X_train, Y_train = X[:split] or X, Y[:split] or Y   # if split==0, use all
+    X_val,   Y_val   = (X[split:], Y[split:]) if split else (None, None)
 
-SensorPrediction.objects.bulk_create(records, batch_size=24)
+    model = Sequential([
+        LSTM(64, activation="relu",
+             input_shape=(LOOKBACK, len(sensor_cols))),
+        Dense(len(sensor_cols))
+    ])
+    model.compile(optimizer="adam", loss="mse")
 
-print("✅ Predictions saved in MySQL via Django ORM (24h forecast).")
+    model.fit(
+        X_train, Y_train,
+        validation_data=(X_val, Y_val) if split else None,
+        epochs=30, batch_size=min(8, len(X_train)),
+        verbose=1
+    )
+
+    # 5) Roll the forecast
+    seq          = scaled[-LOOKBACK:].copy()
+    pred_scaled  = []
+    for _ in range(24):
+        p = model.predict(seq[np.newaxis], verbose=0)[0]
+        pred_scaled.append(p)
+        seq = np.concatenate([seq[1:], p[None, :]], axis=0)
+
+    predictions = scaler.inverse_transform(np.asarray(pred_scaled))
+
+    # shift so the first forecast matches the last real observation
+    predictions += df_hourly.iloc[-1].to_numpy() - predictions[0]
+
+# 6) Clamp temperature
+predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
