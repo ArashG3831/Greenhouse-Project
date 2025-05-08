@@ -78,7 +78,9 @@ else:
     model.compile(optimizer='adam', loss='mse')
 
     # -- TRAIN (no val split if tiny data)
-    model.fit(X, Y, epochs=30, batch_size=min(8, len(X)), verbose=1)
+    model.fit(X_train, Y_train,
+              validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
+              epochs=30, batch_size=min(8, len(X_train)), verbose=1)
 
     # -- PREDICT
     last_seq = scaled_data[-LOOKBACK:]
