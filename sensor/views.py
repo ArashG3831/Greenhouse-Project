@@ -11,6 +11,7 @@ from django.utils.timezone import localtime
 # ----------------------- Sensor Data API -----------------------
 
 @api_view(['GET'])
+@cache_page(10)  # cache for 10 seconds
 def get_data(request):
     time_range = request.GET.get('range', '7d')
     now_time = now()
