@@ -1,6 +1,5 @@
 import os
 import django
-import random
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -10,41 +9,42 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras import Input
 
+# -- 0) SETTINGS
 LOOKBACK = 24
 
-# Setup Django
+# -- 1) DJANGO SETUP
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
 django.setup()
 
 from sensor.models import SensorData, SensorPrediction
 
-# -- 1) LOAD DATA FROM DB
+# -- 2) LOAD DATA FROM DB
 qs = SensorData.objects.all().order_by("timestamp")
 df = pd.DataFrame.from_records(qs.values(
     "timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"
 ))
+
+# -- 3) PREPROCESSING
 df["timestamp"] = pd.to_datetime(df["timestamp"])
 df.set_index("timestamp", inplace=True)
 df.sort_index(inplace=True)
 
-# -- 2) RESAMPLE HOURLY & FILTER LAST 7 DAYS
+# -- 4) RESAMPLE HOURLY, FILL GAPS, SELECT LATEST WINDOW
 df_hourly = df.resample("h").mean()
-df_hourly = df_hourly.fillna(method="ffill").fillna(method="bfill")  # Fill gaps to prevent dropna
+df_hourly = df_hourly.fillna(method="ffill").fillna(method="bfill")
+df_hourly = df_hourly.tail(LOOKBACK + 24)
 
 if len(df_hourly) < LOOKBACK + 1:
-    raise ValueError(f"🚫 Not enough hourly data to form a single sequence. Need at least {LOOKBACK + 1} hours.")
-
-# Always use just the most recent LOOKBACK+24 points (1 day + room for prediction)
-df_hourly = df_hourly.tail(LOOKBACK + 24)
+    raise ValueError(f"🚫 Not enough hourly data to form a single sequence. Got {len(df_hourly)}, need at least {LOOKBACK + 1} hours.")
 
 sensor_cols = ["temperature", "humidity", "oxygen_level", "co2_level", "light_illumination"]
 data = df_hourly[sensor_cols].values
 
-# -- 3) SCALE DATA
+# -- 5) SCALE DATA
 scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
-# -- 4) CREATE SEQUENCES (LOOKBACK=24 HOURS)
+# -- 6) CREATE SEQUENCES
 def create_sequences(dataset, lookback=24):
     X, Y = [], []
     for i in range(len(dataset) - lookback):
@@ -55,23 +55,22 @@ def create_sequences(dataset, lookback=24):
 X, Y = create_sequences(scaled_data, LOOKBACK)
 
 if len(X) == 0 or X.ndim != 3:
-    print(f"⚠️ Not enough data to train. Required shape: (samples, {LOOKBACK}, {len(sensor_cols)}), got: {X.shape}")
-    exit(0)
+    raise ValueError(f"⚠️ Not enough data to train. Required shape: (samples, {LOOKBACK}, {len(sensor_cols)}), got: {X.shape}")
 
-# -- 5) TRAIN/VAL SPLIT
+# -- 7) TRAIN/VAL SPLIT
 split_idx = int(0.8 * len(X))
 X_train, X_val = X[:split_idx], X[split_idx:]
 Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-# -- 6) BUILD & TRAIN MODEL
+# -- 8) BUILD MODEL
 model = Sequential([
     Input(shape=(LOOKBACK, len(sensor_cols))),
     LSTM(64, activation='relu'),
     Dense(len(sensor_cols))
 ])
-
 model.compile(optimizer='adam', loss='mse')
 
+# -- 9) TRAIN
 model.fit(
     X_train, Y_train,
     validation_data=(X_val, Y_val),
@@ -80,7 +79,7 @@ model.fit(
     verbose=1
 )
 
-# -- 7) PREDICT NEXT 24 HOURS
+# -- 10) PREDICT NEXT 24 HOURS
 last_24 = scaled_data[-LOOKBACK:]
 current_seq = last_24.copy()
 predictions_scaled = []
@@ -93,15 +92,15 @@ for _ in range(24):
 predictions_scaled = np.array(predictions_scaled)
 predictions = scaler.inverse_transform(predictions_scaled)
 
-# -- 8) CONTINUITY: SHIFT TO MATCH LAST REAL VALUE
+# -- 11) CONTINUITY SHIFT
 last_real = df_hourly.iloc[-1].values
 diff = last_real - predictions[0]
 predictions += diff
 
-# -- 9) CLAMP TEMPERATURE RANGE
+# -- 12) CLAMP TEMPERATURE
 predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
 
-# -- 10) SAVE TO SENSORPREDICTION TABLE
+# -- 13) SAVE TO DB
 SensorPrediction.objects.all().delete()
 
 last_ts = df_hourly.index[-1]
