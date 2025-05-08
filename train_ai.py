@@ -8,6 +8,9 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras import Input
+
+LOOKBACK = 24
 
 # Setup Django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
@@ -42,7 +45,6 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # -- 4) CREATE SEQUENCES (LOOKBACK=24 HOURS)
-LOOKBACK = 24
 def create_sequences(dataset, lookback=24):
     X, Y = [], []
     for i in range(len(dataset) - lookback):
@@ -62,7 +64,11 @@ X_train, X_val = X[:split_idx], X[split_idx:]
 Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
 # -- 6) BUILD & TRAIN MODEL
-model = Sequential()
+model = Sequential([
+    Input(shape=(LOOKBACK, len(sensor_cols))),
+    LSTM(64, activation='relu'),
+    Dense(len(sensor_cols))
+])
 model.add(LSTM(64, activation='relu', input_shape=(LOOKBACK, len(sensor_cols))))
 model.add(Dense(len(sensor_cols)))
 model.compile(optimizer='adam', loss='mse')
