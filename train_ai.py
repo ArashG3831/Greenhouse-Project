@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 robust_forecast.py  –  24-hour sensor forecast via Django ORM
-* Handles as little as two hourly rows (persistence baseline)
-* Trains/loads an LSTM once you have ≥ MIN_SEQS_FOR_LSTM sequences
-* Saves predictions back to SensorPrediction in one atomic transaction
+* Survives tiny data sets (persistence baseline if too small)
+* Trains / reloads an LSTM once ≥ MIN_SEQS_FOR_LSTM sequences exist
+* Writes predictions in a single atomic DB transaction
 """
 
 import os
@@ -73,14 +73,28 @@ scaler = MinMaxScaler()
 scaled = scaler.fit_transform(data)
 
 # ---------------- Build sequences ----------------
-def make_xy(arr, lkbk):
-    X, Y = [], []
-    for i in range(len(arr) - lkbk):
-        X.append(arr[i : i + lkbk])
-        Y.append(arr[i + lkbk])
-    return np.asarray(X, dtype=np.float32), np.asarray(Y, dtype=np.float32)
+def make_xy(arr: np.ndarray, lkbk: int):
+    """
+    Return X  (n_samples, lkbk, features)  and
+           Y  (n_samples, features).
+    Uses np.stack -> will raise if shapes differ (good!).
+    """
+    if len(arr) <= lkbk:
+        return (
+            np.empty((0, lkbk, arr.shape[1]), dtype=np.float32),
+            np.empty((0, arr.shape[1]), dtype=np.float32),
+        )
+
+    X = np.stack([arr[i : i + lkbk] for i in range(len(arr) - lkbk)], axis=0).astype(
+        "float32"
+    )
+    Y = arr[lkbk:].astype("float32")
+    return X, Y
+
 
 X, Y = make_xy(scaled, LOOKBACK)
+
+print("DEBUG • X shape:", X.shape, "Y shape:", Y.shape)  # ← sanity check
 
 # ---------------- Decide modelling strategy ----------------
 if len(X) < MIN_SEQS_FOR_LSTM:
@@ -91,12 +105,14 @@ if len(X) < MIN_SEQS_FOR_LSTM:
     last_obs   = df_hourly.iloc[-1][SENSOR_COLS].to_numpy(dtype=np.float32)
     predictions = np.tile(last_obs, (24, 1))
 else:
-    # ----- Prepare train / val split -----
-    split = int(len(X) * 0.8) if len(X) >= 5 else 0
-    X_train, Y_train = (X[:split], Y[:split]) if split else (X, Y)
-    X_val,   Y_val   = (X[split:], Y[split:]) if split else (None, None)
-
-    print("X_train", X_train.shape, "Y_train", Y_train.shape)
+    # ----- Train / val split -----
+    if len(X) >= 5:
+        split = int(0.8 * len(X))
+        X_train, Y_train = X[:split], Y[:split]
+        X_val,   Y_val   = X[split:], Y[split:]
+    else:
+        X_train, Y_train = X, Y
+        X_val,   Y_val   = None, None
 
     # ----- Build / load model -----
     if (
@@ -107,13 +123,11 @@ else:
         model = keras.models.load_model(MODEL_PATH)
         print("Loaded existing model.")
     else:
-        model = Sequential(
-            [
-                Input(shape=(LOOKBACK, len(SENSOR_COLS))),
-                LSTM(64, activation="relu"),
-                Dense(len(SENSOR_COLS)),
-            ]
-        )
+        model = Sequential([
+            Input(shape=(LOOKBACK, len(SENSOR_COLS))),
+            LSTM(64, activation="relu"),
+            Dense(len(SENSOR_COLS)),
+        ])
         model.compile(optimizer="adam", loss="mse")
 
     # ----- Train -----
@@ -126,7 +140,7 @@ else:
         verbose=1,
     )
 
-    # Save the model only when full look-back is used (consistent shape)
+    # Save when full look-back is used
     if LOOKBACK == MAX_LOOKBACK:
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         model.save(MODEL_PATH)
@@ -145,8 +159,7 @@ else:
     predictions += df_hourly.iloc[-1].to_numpy(dtype=np.float32) - predictions[0]
 
 # ---------------- Post-processing ----------------
-# Clamp temp to plausible range
-predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)
+predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)  # clamp temperature
 
 # ---------------- Save to DB ----------------
 last_ts = df_hourly.index[-1]
