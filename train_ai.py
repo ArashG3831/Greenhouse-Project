@@ -58,40 +58,45 @@ if len(X) == 0 or X.ndim != 3:
     raise ValueError(f"⚠️ Not enough data to train. Required shape: (samples, {LOOKBACK}, {len(sensor_cols)}), got: {X.shape}")
 
 # -- 7) TRAIN/VAL SPLIT
+# -- 7) TRAIN/VAL SPLIT
 split_idx = int(0.8 * len(X))
 X_train, X_val = X[:split_idx], X[split_idx:]
 Y_train, Y_val = Y[:split_idx], Y[split_idx:]
 
-# -- 8) BUILD MODEL
-model = Sequential([
-    Input(shape=(LOOKBACK, len(sensor_cols))),
-    LSTM(64, activation='relu'),
-    Dense(len(sensor_cols))
-])
-model.compile(optimizer='adam', loss='mse')
+if len(X_train) < 1:
+    print(f"⚠️ Not enough sequences to train. Got only {len(X)} sequence(s). Skipping model training.")
+    predictions = np.repeat(data[-1][np.newaxis, :], 24, axis=0)  # naive repeat of last known value
+else:
+    # -- 8) BUILD MODEL
+    model = Sequential([
+        Input(shape=(LOOKBACK, len(sensor_cols))),
+        LSTM(64, activation='relu'),
+        Dense(len(sensor_cols))
+    ])
+    model.compile(optimizer='adam', loss='mse')
 
-# -- 9) TRAIN (dynamic batch size)
-batch_size = min(8, len(X_train))
-model.fit(
-    X_train, Y_train,
-    validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
-    epochs=30,
-    batch_size=batch_size,
-    verbose=1
-)
+    # -- 9) TRAIN
+    batch_size = min(8, len(X_train))
+    model.fit(
+        X_train, Y_train,
+        validation_data=(X_val, Y_val) if len(X_val) > 0 else None,
+        epochs=30,
+        batch_size=batch_size,
+        verbose=1
+    )
 
-# -- 10) PREDICT NEXT 24 HOURS
-last_24 = scaled_data[-LOOKBACK:]
-current_seq = last_24.copy()
-predictions_scaled = []
+    # -- 10) PREDICT NEXT 24 HOURS
+    last_24 = scaled_data[-LOOKBACK:]
+    current_seq = last_24.copy()
+    predictions_scaled = []
 
-for _ in range(24):
-    pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
-    predictions_scaled.append(pred)
-    current_seq = np.vstack([current_seq[1:], pred])
+    for _ in range(24):
+        pred = model.predict(current_seq[np.newaxis, :, :], verbose=0)[0]
+        predictions_scaled.append(pred)
+        current_seq = np.vstack([current_seq[1:], pred])
 
-predictions_scaled = np.array(predictions_scaled)
-predictions = scaler.inverse_transform(predictions_scaled)
+    predictions_scaled = np.array(predictions_scaled)
+    predictions = scaler.inverse_transform(predictions_scaled)
 
 # -- 11) CONTINUITY SHIFT
 last_real = df_hourly.iloc[-1].values
