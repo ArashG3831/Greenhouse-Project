@@ -35,6 +35,8 @@ MIN_SEQS_FOR_LSTM    = 10
 HISTORY_DAYS         = 7
 MODEL_PATH           = "models/lstm_sensor_1min.h5"
 
+
+
 SENSOR_COLS = [
     "temperature",
     "humidity",
@@ -69,6 +71,18 @@ print("DEBUG • after 1-min resample:", len(df), "rows")
 available_rows = len(df)
 if available_rows < MIN_SEQS_FOR_LSTM + 1:
     raise RuntimeError(f"Need at least {MIN_SEQS_FOR_LSTM + 1} rows, got {available_rows}.")
+# ---------------- Dynamic look-back (adjusted for actual learning) ----------------
+MIN_SEQS_FOR_LSTM = 100
+lookback_steps = max(10, available_rows - MIN_SEQS_FOR_LSTM)
+
+# Cap at max 1,440 (1 day), which is enough for 100+ samples
+lookback_steps = min(lookback_steps, 1440)
+
+print(
+    f"DEBUG • adjusted look-back = {lookback_steps} steps "
+    f"({lookback_steps/60:.1f} h), "
+    f"training sequences = {available_rows - lookback_steps}"
+)
 
 # ---------------- Dynamic look-back ----------------
 lookback_steps = min(
