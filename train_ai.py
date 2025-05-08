@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-robust_forecast.py  –  24-hour sensor forecast via Django ORM
-* Survives tiny data sets (persistence baseline if too small)
-* Trains / reloads an LSTM once ≥ MIN_SEQS_FOR_LSTM sequences exist
-* Writes predictions in a single atomic DB transaction
+robust_forecast.py – 24‑hour sensor forecast via Django ORM
+• Screams in DEBUG if the database returns 0 rows
+• Shrinks look‑back automatically; falls back to persistence baseline
+• Trains / reloads an LSTM when you finally have enough sequences
+• Saves predictions atomically to SensorPrediction
 """
 
 import os
@@ -18,16 +19,20 @@ from tensorflow.keras import Input, Sequential
 from tensorflow.keras.layers import LSTM, Dense
 from tensorflow import keras
 
-# ---------------- Django setup ----------------
+# ---------------------------------------------------------------------
+# DJANGO SETUP
+# ---------------------------------------------------------------------
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "server.settings")
 django.setup()
 
-from sensor.models import SensorData, SensorPrediction   # noqa: E402
+from sensor.models import SensorData, SensorPrediction  # noqa: E402
 
-# ---------------- Config ----------------
-HISTORY_DAYS        = 7      # query this much history from DB
-MAX_LOOKBACK        = 24     # desired timesteps (hours) for the LSTM
-MIN_SEQS_FOR_LSTM   = 10     # min training samples to bother with an LSTM
+# ---------------------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------------------
+HISTORY_DAYS        = 7      # look back this many days in the DB
+MAX_LOOKBACK        = 24     # preferred hour window for LSTM
+MIN_SEQS_FOR_LSTM   = 10     # need ≥ this many training samples for LSTM
 MODEL_PATH          = "models/lstm_sensor.h5"
 
 SENSOR_COLS = [
@@ -38,46 +43,87 @@ SENSOR_COLS = [
     "light_illumination",
 ]
 
-# ---------------- Load & resample ----------------
+# ---------------------------------------------------------------------
+# OPTIONAL: turn on raw SQL logging (remove if too noisy)
+# ---------------------------------------------------------------------
+if os.getenv("SQL_DEBUG", "0") == "1":
+    import logging
+
+    logging.basicConfig(level=logging.DEBUG)
+    logging.getLogger("django.db.backends").setLevel(logging.DEBUG)
+
+# ---------------------------------------------------------------------
+# 1. READ FROM DATABASE
+# ---------------------------------------------------------------------
 now = datetime.utcnow()
 qs = (
     SensorData.objects
     .filter(timestamp__gte=now - timedelta(days=HISTORY_DAYS))
     .order_by("timestamp")
 )
-df = pd.DataFrame.from_records(qs.values("timestamp", *SENSOR_COLS))
-if df.empty:
-    raise RuntimeError("No SensorData rows found in the last 7 days.")
 
+row_count = qs.count()
+print(f"DEBUG • fetched {row_count} SensorData rows")
+
+if row_count == 0:
+    raise RuntimeError("Database returned zero rows – aborting forecast.")
+
+# show two sample rows so you can *see* values
+for rec in qs[:2]:
+    print(
+        "DEBUG • sample row:",
+        rec.timestamp.isoformat(),
+        rec.temperature,
+        rec.humidity,
+        rec.oxygen_level,
+        rec.co2_level,
+        rec.light_illumination,
+    )
+
+# build DataFrame
+df = pd.DataFrame.from_records(qs.values("timestamp", *SENSOR_COLS))
+
+# ---------------------------------------------------------------------
+# 2. RESAMPLE TO HOURLY MEANS
+# ---------------------------------------------------------------------
 df_hourly = (
     df.set_index("timestamp")
       .sort_index()
       .resample("1H", origin="start")
       .mean()
-      .dropna()
+      .dropna()                # drop any row that still has NaNs
 )
 
 available_rows = len(df_hourly)
+print(f"DEBUG • hourly rows after resample: {available_rows}")
+
 if available_rows < 2:
     raise RuntimeError(
         f"Need ≥ 2 hourly rows to forecast, only have {available_rows}."
     )
 
-# ---------------- Dynamic look-back ----------------
+# ---------------------------------------------------------------------
+# 3. DYNAMIC LOOK‑BACK WINDOW
+# ---------------------------------------------------------------------
 LOOKBACK = max(1, min(MAX_LOOKBACK, available_rows - 1))
+print(f"DEBUG • using LOOKBACK={LOOKBACK} hours")
 
 data = df_hourly[SENSOR_COLS].to_numpy(dtype=np.float32)
 
-# ---------------- Scale ----------------
+# ---------------------------------------------------------------------
+# 4. SCALE FEATURES 0‑1
+# ---------------------------------------------------------------------
 scaler = MinMaxScaler()
 scaled = scaler.fit_transform(data)
 
-# ---------------- Build sequences ----------------
+# ---------------------------------------------------------------------
+# 5. MAKE (X, Y) SEQUENCES
+# ---------------------------------------------------------------------
 def make_xy(arr: np.ndarray, lkbk: int):
     """
-    Return X  (n_samples, lkbk, features)  and
-           Y  (n_samples, features).
-    Uses np.stack -> will raise if shapes differ (good!).
+    Build training pairs with strict shape checks.
+    X  -> (n_samples, lkbk, n_features)
+    Y  -> (n_samples, n_features)
     """
     if len(arr) <= lkbk:
         return (
@@ -85,27 +131,30 @@ def make_xy(arr: np.ndarray, lkbk: int):
             np.empty((0, arr.shape[1]), dtype=np.float32),
         )
 
-    X = np.stack([arr[i : i + lkbk] for i in range(len(arr) - lkbk)], axis=0).astype(
-        "float32"
-    )
+    X = np.stack(
+        [arr[i : i + lkbk] for i in range(len(arr) - lkbk)],
+        axis=0,
+    ).astype("float32")
     Y = arr[lkbk:].astype("float32")
     return X, Y
 
 
 X, Y = make_xy(scaled, LOOKBACK)
+print("DEBUG • X shape:", X.shape, "Y shape:", Y.shape)
 
-print("DEBUG • X shape:", X.shape, "Y shape:", Y.shape)  # ← sanity check
-
-# ---------------- Decide modelling strategy ----------------
+# ---------------------------------------------------------------------
+# 6. CHOOSE MODEL STRATEGY
+# ---------------------------------------------------------------------
 if len(X) < MIN_SEQS_FOR_LSTM:
-    # ----- Persistence baseline -----
+    # ——— Persistence baseline ———
     print(
-        f"⚠️  Only {len(X)} training samples – using persistence baseline."
+        f"⚠️  Only {len(X)} training samples (<{MIN_SEQS_FOR_LSTM}). "
+        "Repeating last observation for 24 h."
     )
-    last_obs   = df_hourly.iloc[-1][SENSOR_COLS].to_numpy(dtype=np.float32)
+    last_obs = df_hourly.iloc[-1][SENSOR_COLS].to_numpy(dtype=np.float32)
     predictions = np.tile(last_obs, (24, 1))
 else:
-    # ----- Train / val split -----
+    # ---------------- Train / val split ----------------
     if len(X) >= 5:
         split = int(0.8 * len(X))
         X_train, Y_train = X[:split], Y[:split]
@@ -114,23 +163,24 @@ else:
         X_train, Y_train = X, Y
         X_val,   Y_val   = None, None
 
-    # ----- Build / load model -----
+    # ---------------- Build / load model ----------------
     if (
         os.path.exists(MODEL_PATH)
         and LOOKBACK == MAX_LOOKBACK
-        and len(X) >= MIN_SEQS_FOR_LSTM
     ):
         model = keras.models.load_model(MODEL_PATH)
-        print("Loaded existing model.")
+        print("DEBUG • loaded existing model from disk")
     else:
-        model = Sequential([
-            Input(shape=(LOOKBACK, len(SENSOR_COLS))),
-            LSTM(64, activation="relu"),
-            Dense(len(SENSOR_COLS)),
-        ])
+        model = Sequential(
+            [
+                Input(shape=(LOOKBACK, len(SENSOR_COLS))),
+                LSTM(64, activation="relu"),
+                Dense(len(SENSOR_COLS)),
+            ]
+        )
         model.compile(optimizer="adam", loss="mse")
 
-    # ----- Train -----
+    # ---------------- Train ----------------
     model.fit(
         X_train,
         Y_train,
@@ -140,12 +190,13 @@ else:
         verbose=1,
     )
 
-    # Save when full look-back is used
+    # save only if shape is stable
     if LOOKBACK == MAX_LOOKBACK:
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         model.save(MODEL_PATH)
+        print("DEBUG • model saved to", MODEL_PATH)
 
-    # ----- Forecast -----
+    # ---------------- Forecast next 24 h ----------------
     seq = scaled[-LOOKBACK:].copy()
     pred_scaled = []
     for _ in range(24):
@@ -155,13 +206,17 @@ else:
 
     predictions = scaler.inverse_transform(np.asarray(pred_scaled))
 
-    # Align first forecast to last real observation
+    # shift so first forecast matches last real obs
     predictions += df_hourly.iloc[-1].to_numpy(dtype=np.float32) - predictions[0]
 
-# ---------------- Post-processing ----------------
-predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)  # clamp temperature
+# ---------------------------------------------------------------------
+# 7. POST‑PROCESSING
+# ---------------------------------------------------------------------
+predictions[:, 0] = np.clip(predictions[:, 0], 15, 40)  # temp safety clamp
 
-# ---------------- Save to DB ----------------
+# ---------------------------------------------------------------------
+# 8. WRITE PREDICTIONS TO DB
+# ---------------------------------------------------------------------
 last_ts = df_hourly.index[-1]
 records = [
     SensorPrediction(
@@ -179,4 +234,4 @@ with transaction.atomic():
     SensorPrediction.objects.all().delete()
     SensorPrediction.objects.bulk_create(records, batch_size=24)
 
-print("✅ 24-hour forecast saved to SensorPrediction.")
+print("✅ 24‑hour forecast saved: wrote", len(records), "rows to SensorPrediction")
