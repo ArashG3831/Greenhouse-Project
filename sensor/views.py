@@ -48,7 +48,6 @@ def get_data(request):
 
 
 @api_view(['GET'])
-@cache_page(5)
 def get_latest(request):
     try:
         latest = SensorData.objects.order_by("-timestamp").first()
