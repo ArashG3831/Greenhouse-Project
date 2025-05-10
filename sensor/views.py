@@ -115,7 +115,7 @@ def get_predictions(request):
 # ----------------------- Control State API -----------------------
 
 @api_view(['GET'])
-@cache_page(1)  # Cache for just 1 second
+# @cache_page(1)  # Cache for just 1 second
 def get_control_state(request):
     control, _ = ControlState.objects.get_or_create(id=1)
     return Response({
