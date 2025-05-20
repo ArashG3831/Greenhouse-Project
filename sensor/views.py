@@ -37,9 +37,10 @@ def get_data(request):
             timestamp=Min("timestamp"),
             temperature=Avg("temperature"),
             humidity=Avg("humidity"),
-            oxygen_level=Avg("oxygen_level"),
+            soil_moisture=Avg("soil_moisture"),
             co2_level=Avg("co2_level"),
             light_illumination=Avg("light_illumination"),
+            leaf_color=RawSQL("SUBSTRING_INDEX(GROUP_CONCAT(leaf_color), ',', 1)", [])  # simple hack
         )
         .order_by("minute_bucket")
     )
@@ -55,13 +56,15 @@ def get_latest(request):
             return Response({"error": "No sensor data available."}, status=404)
 
         return Response({
-            "timestamp": localtime(latest.timestamp).isoformat(),  # Ensure it's a proper ISO string
+            "timestamp": localtime(latest.timestamp).isoformat(),
             "temperature": latest.temperature,
             "humidity": latest.humidity,
-            "oxygen_level": latest.oxygen_level,
+            "soil_moisture": latest.soil_moisture,
             "co2_level": latest.co2_level,
             "light_illumination": latest.light_illumination,
+            "leaf_color": latest.leaf_color,
         })
+
 
     except Exception as e:
         print("❌ Error in get_latest:", str(e))
@@ -73,7 +76,12 @@ def receive_data(request):
         data = request.data
         print("🔥 Received data:", data)
 
-        for field in ["temperature", "humidity", "oxygen_level", "light_illumination"]:
+        required_fields = [
+            "temperature", "humidity", "light_illumination",
+            "soil_moisture", "leaf_color"
+        ]
+
+        for field in required_fields:
             if field not in data:
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
@@ -81,9 +89,10 @@ def receive_data(request):
             timestamp=now(),
             temperature=data["temperature"],
             humidity=data["humidity"],
-            oxygen_level=data["oxygen_level"],
             co2_level=data.get("co2_level", 400),
-            light_illumination=data["light_illumination"]
+            light_illumination=data["light_illumination"],
+            soil_moisture=data["soil_moisture"],
+            leaf_color=data["leaf_color"]
         )
 
         print("✅ Stored successfully in DB:", entry)

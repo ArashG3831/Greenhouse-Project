@@ -16,12 +16,15 @@ class SensorData(models.Model):
     timestamp = models.DateTimeField(default=timezone.now, db_index=True)
     temperature = models.FloatField()
     humidity = models.FloatField()
-    oxygen_level = models.FloatField()
     co2_level = models.FloatField(null=True, blank=True)
     light_illumination = models.FloatField()
+    soil_moisture = models.FloatField()
+    leaf_color = models.CharField(max_length=20)  # Example: "#AABBCC" or "green"
 
     def __str__(self):
-        return f"Temp: {self.temperature}°C, Humidity: {self.humidity}%, O2: {self.oxygen_level}%, CO2: {self.co2_level}, Light: {self.light_illumination}lx"
+        return (f"Temp: {self.temperature}°C, Humidity: {self.humidity}%, "
+                f"Soil Moisture: {self.soil_moisture}%, CO2: {self.co2_level}, "
+                f"Light: {self.light_illumination}lx, Leaf: {self.leaf_color}")
 
 class ControlState(models.Model):
     """Stores the current state of Fan and Water controls."""
