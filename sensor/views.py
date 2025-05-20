@@ -13,39 +13,44 @@ from django.utils.timezone import localtime
 @api_view(['GET'])
 @cache_page(10)  # cache for 10 seconds
 def get_data(request):
-    time_range = request.GET.get('range', '7d')
-    now_time = now()
+    try:
+        time_range = request.GET.get('range', '7d')
+        now_time = now()
 
-    range_map = {
-        '1h':  (now_time - timedelta(hours=1), 1),
-        '24h': (now_time - timedelta(hours=24), 5),
-        '7d':  (now_time - timedelta(days=7), 30),
-        '30d': (now_time - timedelta(days=30), 60),
-    }
+        range_map = {
+            '1h':  (now_time - timedelta(hours=1), 1),
+            '24h': (now_time - timedelta(hours=24), 5),
+            '7d':  (now_time - timedelta(days=7), 30),
+            '30d': (now_time - timedelta(days=30), 60),
+        }
 
-    start_date, group_minutes = range_map.get(time_range, range_map['7d'])
+        start_date, group_minutes = range_map.get(time_range, range_map['7d'])
 
-    queryset = (
-        SensorData.objects
-        .filter(timestamp__gte=start_date)
-        .annotate(minute_bucket=RawSQL(
-            "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(timestamp) / %s) * %s)",
-            (group_minutes * 60, group_minutes * 60)
-        ))
-        .values("minute_bucket")
-        .annotate(
-            timestamp=Min("timestamp"),
-            temperature=Avg("temperature"),
-            humidity=Avg("humidity"),
-            soil_moisture=Avg("soil_moisture"),
-            co2_level=Avg("co2_level"),
-            light_illumination=Avg("light_illumination"),
-            leaf_color=RawSQL("SUBSTRING_INDEX(GROUP_CONCAT(leaf_color), ',', 1)", [])  # simple hack
+        queryset = (
+            SensorData.objects
+            .filter(timestamp__gte=start_date)
+            .annotate(minute_bucket=RawSQL(
+                "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(timestamp) / %s) * %s)",
+                (group_minutes * 60, group_minutes * 60)
+            ))
+            .values("minute_bucket")
+            .annotate(
+                timestamp=Min("timestamp"),
+                temperature=Avg("temperature"),
+                humidity=Avg("humidity"),
+                soil_moisture=Avg("soil_moisture"),
+                co2_level=Avg("co2_level"),
+                light_illumination=Avg("light_illumination"),
+                leaf_color=RawSQL("IFNULL(SUBSTRING_INDEX(GROUP_CONCAT(leaf_color), ',', 1), '#00ff00')", [])
+            )
+            .order_by("minute_bucket")
         )
-        .order_by("minute_bucket")
-    )
 
-    return Response({"data": list(queryset)})
+        return Response({"data": list(queryset)})
+
+    except Exception as e:
+        print("❌ Error in get_data:", str(e))
+        return Response({"error": str(e)}, status=500)
 
 
 @api_view(['GET'])
@@ -62,7 +67,7 @@ def get_latest(request):
             "soil_moisture": latest.soil_moisture,
             "co2_level": latest.co2_level,
             "light_illumination": latest.light_illumination,
-            "leaf_color": latest.leaf_color,
+            "leaf_color": latest.leaf_color or "#00ff00",
         })
 
 
