@@ -41,7 +41,7 @@ def get_data(request):
                 soil_moisture=Avg("soil_moisture"),
                 co2_level=Avg("co2_level"),
                 light_illumination=Avg("light_illumination"),
-                leaf_color=RawSQL("MAX(leaf_color)", [])
+                leaf_color=RawSQL("IFNULL(SUBSTRING_INDEX(GROUP_CONCAT(leaf_color), ',', 1), '#00ff00')", [])
             )
             .order_by("minute_bucket")
         )
