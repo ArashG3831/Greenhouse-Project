@@ -26,6 +26,7 @@ def get_data(request):
 
         start_date, group_minutes = range_map.get(time_range, range_map['7d'])
 
+        # Basic aggregation (without touching leaf_color)
         queryset = (
             SensorData.objects
             .filter(timestamp__gte=start_date)
@@ -41,17 +42,30 @@ def get_data(request):
                 soil_moisture=Avg("soil_moisture"),
                 co2_level=Avg("co2_level"),
                 light_illumination=Avg("light_illumination"),
-                leaf_color=RawSQL("IFNULL(SUBSTRING_INDEX(GROUP_CONCAT(leaf_color), ',', 1), '#00ff00')", [])
             )
             .order_by("minute_bucket")
         )
 
-        return Response({"data": list(queryset)})
+        data = list(queryset)
+
+        # Manually add leaf_color in Python
+        for entry in data:
+            bucket_time = entry['timestamp']
+            first_leaf_color = (
+                SensorData.objects
+                .filter(timestamp__gte=bucket_time)
+                .exclude(leaf_color__isnull=True)
+                .exclude(leaf_color='')
+                .values_list('leaf_color', flat=True)
+                .first()
+            )
+            entry['leaf_color'] = first_leaf_color or "#00ff00"
+
+        return Response({"data": data})
 
     except Exception as e:
         print("❌ Error in get_data:", str(e))
         return Response({"error": str(e)}, status=500)
-
 
 @api_view(['GET'])
 def get_latest(request):
