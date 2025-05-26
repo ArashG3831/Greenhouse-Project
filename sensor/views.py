@@ -1,13 +1,15 @@
 from django.utils.timezone import now, timedelta
 from django.db.models import Avg, Min
 from django.db.models.expressions import RawSQL
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
 from django.utils import timezone
 from .models import SensorData, SensorPrediction, ControlState
 from django.views.decorators.cache import cache_page
 from django.utils.timezone import localtime
-
+from django.utils.timezone import now
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.views.decorators.csrf import csrf_exempt
+from .models import SensorData
 # ----------------------- Sensor Data API -----------------------
 
 @api_view(['GET'])
@@ -90,27 +92,40 @@ def get_latest(request):
         return Response({"error": str(e)}, status=500)
 
 @api_view(['POST'])
+@csrf_exempt
 def receive_data(request):
     try:
-        data = request.data
+        data = request.data if hasattr(request, "data") else request.POST
         print("🔥 Received data:", data)
 
         required_fields = [
             "temperature", "humidity", "light_illumination",
-            "soil_moisture", "leaf_color"
+            "soil_moisture", "co2_level", "leaf_color"
         ]
 
         for field in required_fields:
             if field not in data:
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
+        # Optional timestamp handling (if provided by Arduino via GSM time)
+        timestamp = data.get("timestamp")
+        if timestamp:
+            from dateutil.parser import parse as parse_date
+            try:
+                timestamp = parse_date(timestamp)
+            except Exception as e:
+                print("⚠️ Invalid timestamp format. Using now(). Error:", str(e))
+                timestamp = now()
+        else:
+            timestamp = now()
+
         entry = SensorData.objects.create(
-            timestamp=now(),
-            temperature=data["temperature"],
-            humidity=data["humidity"],
-            co2_level=data.get("co2_level", 400),
-            light_illumination=data["light_illumination"],
-            soil_moisture=data["soil_moisture"],
+            timestamp=timestamp,
+            temperature=float(data["temperature"]),
+            humidity=float(data["humidity"]),
+            light_illumination=float(data["light_illumination"]),
+            soil_moisture=float(data["soil_moisture"]),
+            co2_level=float(data["co2_level"]),
             leaf_color=data["leaf_color"]
         )
 
@@ -120,7 +135,6 @@ def receive_data(request):
     except Exception as e:
         print("❌ Error in receive_data:", str(e))
         return Response({"error": str(e)}, status=500)
-
 
 # ----------------------- Prediction API -----------------------
 
