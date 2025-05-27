@@ -1,16 +1,16 @@
 from django.db import models
 from django.utils import timezone
 
-# class SensorPrediction(models.Model):
-#     timestamp = models.DateTimeField()
-#     temperature = models.FloatField()
-#     humidity = models.FloatField()
-#     soil_moisture = models.FloatField()  # ✅ NEW FIELD
-#     co2_level = models.FloatField()
-#     light_illumination = models.FloatField()
-#
-#     def __str__(self):
-#         return f"[Prediction @ {self.timestamp}] T={self.temperature} H={self.humidity} Soil={self.soil_moisture}"
+class SensorPrediction(models.Model):
+    timestamp = models.DateTimeField()
+    temperature = models.FloatField()
+    humidity = models.FloatField()
+    soil_moisture = models.FloatField()  # ✅ NEW FIELD
+    co2_level = models.FloatField()
+    light_illumination = models.FloatField()
+
+    def __str__(self):
+        return f"[Prediction @ {self.timestamp}] T={self.temperature} H={self.humidity} Soil={self.soil_moisture}"
 
 class SensorData(models.Model):
     timestamp = models.DateTimeField(default=timezone.now, db_index=True)
