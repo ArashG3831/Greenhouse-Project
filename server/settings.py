@@ -105,3 +105,5 @@ CORS_ALLOWED_ORIGINS = [
     "https://arashg.ir",
     "https://api.arashg.ir"
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True
