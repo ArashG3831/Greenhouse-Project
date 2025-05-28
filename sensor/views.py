@@ -133,7 +133,7 @@ def get_predictions(request):
         predictions = (
             SensorPrediction.objects
             .order_by("-timestamp")[:24]
-            .values("timestamp", "temperature", "humidity", "oxygen_level", "co2_level", "light_illumination")
+            .values("timestamp", "temperature", "humidity", "soil_moisture", "co2_level", "light_illumination")
         )
         return Response(list(reversed(predictions)))
 
