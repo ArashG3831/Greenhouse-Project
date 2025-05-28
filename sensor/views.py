@@ -51,19 +51,6 @@ def get_data(request):
 
         data = list(queryset)
 
-        # Manually add leaf_color in Python
-        for entry in data:
-            bucket_time = entry['timestamp']
-            first_leaf_color = (
-                SensorData.objects
-                .filter(timestamp__gte=bucket_time)
-                .exclude(leaf_color__isnull=True)
-                .exclude(leaf_color='')
-                .values_list('leaf_color', flat=True)
-                .first()
-            )
-            entry['leaf_color'] = first_leaf_color or "#00ff00"
-
         return Response({"data": data})
 
     except Exception as e:
