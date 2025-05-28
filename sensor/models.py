@@ -15,7 +15,7 @@ class SensorPrediction(models.Model):
 
 
 class SensorData(models.Model):
-    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     temperature = models.FloatField()
     humidity = models.FloatField()
     co2_level = models.FloatField(null=True, blank=True)

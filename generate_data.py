@@ -5,64 +5,75 @@ from zoneinfo import ZoneInfo
 
 # --- Config ---
 DB_CONFIG = {
-    "host": "localhost",  # or '127.0.0.1' if you're outside Docker
+    "host": "localhost",  # Change to "db" if inside Docker
     "user": "user",
     "password": "password",
     "database": "greenhouse",
 }
 
+# --- Time Setup ---
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
-NOW = datetime.now(TEHRAN_TZ)
-START_DATE = NOW - timedelta(days=60)
+NOW_TEHRAN = datetime.now(TEHRAN_TZ)
+NOW_UTC = NOW_TEHRAN.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)  # <-- THIS is the key
+START_UTC = NOW_UTC - timedelta(days=30)
 INTERVAL = timedelta(seconds=5)
-NUM_ENTRIES = int((NOW - START_DATE).total_seconds() / INTERVAL.total_seconds())
+NUM_ENTRIES = int((NOW_UTC - START_UTC).total_seconds() / INTERVAL.total_seconds())
 
-print(f"🔥 Generating {NUM_ENTRIES} entries from {START_DATE} to {NOW}")
+print(f"🔥 Generating {NUM_ENTRIES} entries from {START_UTC} to {NOW_UTC}")
 
 # --- DB Connection ---
 conn = mysql.connector.connect(**DB_CONFIG)
 cursor = conn.cursor()
 
-# --- Prepare Insert Query ---
+# --- Insert Query ---
 insert_query = """
-    INSERT INTO sensor_sensordata 
-    (timestamp, temperature, humidity, oxygen_level, co2_level, light_illumination)
-    VALUES (%s, %s, %s, %s, %s, %s)
+    INSERT INTO sensor_sensordata
+    (timestamp, temperature, humidity, soil_moisture, co2_level, light_illumination, leaf_color)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
 """
 
-# --- Baseline values ---
+# --- Initial values ---
 temperature = random.uniform(25, 30)
 humidity = random.uniform(60, 70)
-oxygen = random.uniform(19.5, 20.5)
 co2 = random.uniform(400, 500)
 light = random.uniform(600, 800)
-current_time = START_DATE
+soil_moisture = random.uniform(35, 50)
+current_time = START_UTC
+
+# --- Leaf color generator ---
+def generate_leaf_color():
+    green = random.randint(100, 255)
+    red = random.randint(50, 180)
+    blue = random.randint(0, 100)
+    return f"#{red:02x}{green:02x}{blue:02x}"
 
 # --- Batch insert ---
 batch_size = 5000
 buffer = []
 
-for i in range(NUM_ENTRIES):
+for _ in range(NUM_ENTRIES):
+    # Simulate fluctuations
     temperature += random.uniform(-0.05, 0.05)
     humidity += random.uniform(-0.15, 0.15)
-    oxygen += random.uniform(-0.005, 0.005)
     co2 += random.uniform(-0.1, 0.1)
     light += random.uniform(-0.5, 0.5)
+    soil_moisture += random.uniform(-0.2, 0.2)
 
     # Clamp values
     temperature = max(20, min(temperature, 35))
     humidity = max(40, min(humidity, 90))
-    oxygen = max(19, min(oxygen, 21))
     co2 = max(300, min(co2, 600))
     light = max(200, min(light, 1200))
+    soil_moisture = max(30, min(soil_moisture, 60))
 
     row = (
         current_time,
         round(temperature, 2),
         round(humidity, 2),
-        round(oxygen, 2),
+        round(soil_moisture, 2),
         round(co2, 2),
         round(light, 2),
+        generate_leaf_color()
     )
     buffer.append(row)
     current_time += INTERVAL
@@ -81,4 +92,4 @@ if buffer:
 
 cursor.close()
 conn.close()
-print("✅ All done!")
+print("🎉 Done! All sensor data inserted.")

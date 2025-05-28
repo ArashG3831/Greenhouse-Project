@@ -95,20 +95,7 @@ def receive_data(request):
             if field not in data:
                 return Response({"error": f"Missing field: {field}"}, status=400)
 
-        # Optional timestamp handling (if provided by Arduino via GSM time)
-        timestamp = data.get("timestamp")
-        if timestamp:
-            from dateutil.parser import parse as parse_date
-            try:
-                timestamp = parse_date(timestamp)
-            except Exception as e:
-                print("⚠️ Invalid timestamp format. Using now(). Error:", str(e))
-                timestamp = now()
-        else:
-            timestamp = now()
-
         entry = SensorData.objects.create(
-            timestamp=timestamp,
             temperature=float(data["temperature"]),
             humidity=float(data["humidity"]),
             light_illumination=float(data["light_illumination"]),
