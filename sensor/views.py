@@ -44,6 +44,7 @@ def get_data(request):
                 soil_moisture=Avg("soil_moisture"),
                 co2_level=Avg("co2_level"),
                 light_illumination=Avg("light_illumination"),
+                leaf_color=Min("leaf_color"),
             )
             .order_by("minute_bucket")
         )
