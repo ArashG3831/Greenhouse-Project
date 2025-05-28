@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 # --- Config ---
 DB_CONFIG = {
-    "host": "localhost",  # Change to "db" if inside Docker
+    "host": "mysql",  # Change to "db" if inside Docker
     "user": "user",
     "password": "password",
     "database": "greenhouse",
