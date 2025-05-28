@@ -1,11 +1,20 @@
-# syntax=docker/dockerfile:1
 FROM python:3.11
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    default-libmysqlclient-dev gcc
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
-# Simply run sender.py; the script already handles its own timing.
-CMD ["python", "./sender.py"]
+# Collect static files (optional if you're serving them)
+RUN python manage.py collectstatic --noinput
+
+# Run with Gunicorn
+CMD ["gunicorn", "app.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
