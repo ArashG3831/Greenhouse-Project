@@ -22,7 +22,7 @@ def get_data(request):
         range_map = {
             '1h':  (now_time - timedelta(hours=1), 1),
             '24h': (now_time - timedelta(hours=24), 5),
-            '7d':  (now_time - timedelta(days=7), 30),
+            '7d':  (now_time - timedelta(days=7), 60),
             '30d': (now_time - timedelta(days=30), 60),
         }
 
